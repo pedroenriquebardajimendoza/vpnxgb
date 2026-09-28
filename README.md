@@ -33,6 +33,20 @@ Panel web para vender configuraciones de **WireGuard por paquetes de datos**
   servidor completo, y la lista de los que más consumen hoy.
 - Diseño pensado para usarlo **desde el móvil**.
 
+## Outline (opcional)
+
+Además de WireGuard, el panel puede dar a cada cliente una clave de **Outline**
+(útil si en alguna red bloquean WireGuard):
+
+1. Instala Outline en el mismo VPS con su script oficial (getoutline.org).
+2. Copia el texto verde que muestra al final (`{"apiUrl": ..., "certSha256": ...}`).
+3. En el panel: **Ajustes → Outline**, pégalo y pulsa *Conectar*.
+
+Desde ahí cada cliente nuevo recibe también su clave `ss://` (con QR). Los GB se
+descuentan del mismo paquete, y pausar / agotar / recargar / eliminar también
+bloquean o reactivan su clave de Outline (siempre la misma). Outline no permite
+limitar la velocidad por cliente, y su consumo se actualiza cada minuto.
+
 ## Instalación en el VPS
 
 Necesitas un VPS con **Ubuntu 22.04/24.04 o Debian 11/12**, fuera de Cuba y con IP pública.

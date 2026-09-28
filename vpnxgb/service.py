@@ -1,5 +1,6 @@
 """Lógica del negocio: clientes, planes, recargas, consumo y límites."""
 
+import json
 import logging
 import threading
 import time
@@ -7,6 +8,7 @@ from datetime import date, datetime, timedelta
 
 from .config import Settings
 from .db import Database
+from .outline import FakeOutline, OutlineAPI, OutlineError, parse_config
 from .wg import (
     Shaping,
     WireGuard,
@@ -46,6 +48,7 @@ class Panel:
         self.lock = threading.RLock()
         self._server_public_key = settings.server_public_key
         self._live_cache: tuple | None = None
+        self._outline: tuple | None = None  # (config, cliente de la API)
 
     # ------------------------------------------------------------ utilidades
 
@@ -104,8 +107,87 @@ class Panel:
         conn.execute("UPDATE clients SET status = ? WHERE id = ?", (status, client_id))
         if was_active and status != ACTIVE:
             self._disconnect(conn, client)
+            self._outline_set_blocked(client, True)
         elif not was_active and status == ACTIVE:
             self._connect(conn, client)
+            self._outline_set_blocked(client, False)
+
+    # ------------------------------------------------------------ outline
+
+    def outline_config(self) -> dict | None:
+        with self.db.connect() as conn:
+            row = conn.execute("SELECT value FROM settings WHERE key = 'outline'").fetchone()
+        return json.loads(row["value"]) if row else None
+
+    def outline(self):
+        """Cliente de la API de Outline, o None si no está configurado."""
+        cfg = self.outline_config()
+        if not cfg:
+            return None
+        if not self._outline or self._outline[0] != cfg:
+            api = FakeOutline() if self.settings.dry_run else OutlineAPI(
+                cfg["apiUrl"], cfg["certSha256"], timeout=5)
+            self._outline = (cfg, api)
+        return self._outline[1]
+
+    def configure_outline(self, text: str) -> None:
+        try:
+            cfg = parse_config(text)
+            if not self.settings.dry_run:
+                OutlineAPI(cfg["apiUrl"], cfg["certSha256"]).server()  # prueba la conexión
+        except OutlineError as exc:
+            raise PanelError(str(exc))
+        with self.db.connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('outline', ?)",
+                (json.dumps(cfg),),
+            )
+
+    def remove_outline(self) -> None:
+        """Olvida el servidor Outline (no borra las claves en Outline)."""
+        with self.lock, self.db.connect() as conn:
+            conn.execute("DELETE FROM settings WHERE key = 'outline'")
+            conn.execute(
+                "UPDATE clients SET outline_key_id = NULL, outline_url = NULL, ol_last = 0"
+            )
+        self._outline = None
+
+    def _outline_set_blocked(self, client, blocked: bool) -> None:
+        api = self.outline() if client["outline_key_id"] else None
+        if not api:
+            return
+        try:
+            (api.block if blocked else api.unblock)(client["outline_key_id"])
+        except OutlineError as exc:
+            log.error("Outline (%s): %s", client["name"], exc)
+
+    def create_outline_key(self, client_id: int) -> None:
+        api = self.outline()
+        if not api:
+            raise PanelError("Primero configura Outline en Ajustes")
+        with self.lock, self.db.connect() as conn:
+            client = self._client(conn, client_id)
+            if client["outline_key_id"]:
+                return
+            try:
+                key = api.create_key(f"{client['name']} (#{client['id']})")
+            except OutlineError as exc:
+                raise PanelError(str(exc))
+            conn.execute(
+                "UPDATE clients SET outline_key_id = ?, outline_url = ?, ol_last = 0 WHERE id = ?",
+                (str(key["id"]), key["accessUrl"], client_id),
+            )
+            client = self._client(conn, client_id)
+            if client["status"] != ACTIVE:
+                self._outline_set_blocked(client, True)
+
+    def create_missing_outline_keys(self) -> int:
+        with self.db.connect() as conn:
+            ids = [r["id"] for r in conn.execute(
+                "SELECT id FROM clients WHERE outline_key_id IS NULL")]
+        for client_id in ids:
+            self.create_outline_key(client_id)
+        return len(ids)
 
     # ------------------------------------------------------------ arranque
 
@@ -125,15 +207,35 @@ class Panel:
                 if pk not in current:
                     self._connect(conn, client)
             self._reshape(conn)
+            if self.outline():
+                for client in conn.execute(
+                    "SELECT * FROM clients WHERE outline_key_id IS NOT NULL"
+                ).fetchall():
+                    self._outline_set_blocked(client, client["status"] != ACTIVE)
 
     # ------------------------------------------------------------ consumo
 
+    def _add_usage(self, conn, client_id: int, down: int, up: int, outline: int = 0) -> None:
+        conn.execute(
+            "UPDATE clients SET used_bytes = used_bytes + ?, down_bytes = down_bytes + ?, "
+            "up_bytes = up_bytes + ?, outline_bytes = outline_bytes + ? WHERE id = ?",
+            (down + up + outline, down, up, outline, client_id),
+        )
+        if down or up or outline:
+            conn.execute(
+                "INSERT INTO usage_daily (client_id, day, down_bytes, up_bytes, ol_bytes) "
+                "VALUES (?, ?, ?, ?, ?) ON CONFLICT(client_id, day) DO UPDATE SET "
+                "down_bytes = down_bytes + excluded.down_bytes, "
+                "up_bytes = up_bytes + excluded.up_bytes, "
+                "ol_bytes = ol_bytes + excluded.ol_bytes",
+                (client_id, now().strftime("%Y-%m-%d"), down, up, outline),
+            )
+
     def collect_usage(self) -> None:
-        """Suma el tráfico nuevo de cada cliente y corta a quien se pase.
-        Se ejecuta cada `poll_seconds` en segundo plano."""
+        """Suma el tráfico nuevo de cada cliente (WireGuard y Outline) y corta a
+        quien se pase. Se ejecuta cada `poll_seconds` en segundo plano."""
         with self.lock, self.db.connect() as conn:
             stats = self.wg.stats()
-            changed = False
             for client in conn.execute(
                 "SELECT * FROM clients WHERE status = ?", (ACTIVE,)
             ).fetchall():
@@ -147,21 +249,20 @@ class Panel:
                 d_tx = peer.tx - client["last_tx"] if peer.tx >= client["last_tx"] else peer.tx
                 # rx = lo que recibe el servidor = SUBIDA del cliente; tx = BAJADA.
                 conn.execute(
-                    "UPDATE clients SET used_bytes = used_bytes + ?, down_bytes = down_bytes + ?, "
-                    "up_bytes = up_bytes + ?, last_rx = ?, last_tx = ?, last_handshake = ?, "
+                    "UPDATE clients SET last_rx = ?, last_tx = ?, "
+                    "last_handshake = MAX(last_handshake, ?), "
                     "endpoint = CASE WHEN ? != '' THEN ? ELSE endpoint END WHERE id = ?",
-                    (d_rx + d_tx, d_tx, d_rx, peer.rx, peer.tx, peer.latest_handshake,
+                    (peer.rx, peer.tx, peer.latest_handshake,
                      peer.endpoint, peer.endpoint, client["id"]),
                 )
-                if d_rx or d_tx:
-                    conn.execute(
-                        "INSERT INTO usage_daily (client_id, day, down_bytes, up_bytes) "
-                        "VALUES (?, ?, ?, ?) ON CONFLICT(client_id, day) DO UPDATE SET "
-                        "down_bytes = down_bytes + excluded.down_bytes, "
-                        "up_bytes = up_bytes + excluded.up_bytes",
-                        (client["id"], now().strftime("%Y-%m-%d"), d_tx, d_rx),
-                    )
-                client = self._client(conn, client["id"])
+                self._add_usage(conn, client["id"], d_tx, d_rx)
+
+            self._collect_outline(conn)
+
+            changed = False
+            for client in conn.execute(
+                "SELECT * FROM clients WHERE status = ?", (ACTIVE,)
+            ).fetchall():
                 status = self._natural_status(client)
                 if status != ACTIVE:
                     log.info("Cliente %s -> %s", client["name"], status)
@@ -169,6 +270,31 @@ class Panel:
                     changed = True
             if changed:
                 self._reshape(conn)
+
+    def _collect_outline(self, conn) -> None:
+        api = self.outline()
+        if not api:
+            return
+        try:
+            usage = api.transfer()
+        except OutlineError as exc:
+            log.error("Outline: %s", exc)
+            return
+        stamp = int(now().timestamp())
+        for client in conn.execute(
+            "SELECT id, outline_key_id, ol_last FROM clients WHERE outline_key_id IS NOT NULL"
+        ).fetchall():
+            current = usage.get(client["outline_key_id"], 0)
+            # Outline da el total de los últimos 30 días: si baja, es que salieron
+            # días viejos de la cuenta, no consumo nuevo.
+            delta = max(current - client["ol_last"], 0)
+            conn.execute("UPDATE clients SET ol_last = ? WHERE id = ?", (current, client["id"]))
+            if delta:
+                self._add_usage(conn, client["id"], 0, 0, delta)
+                conn.execute(
+                    "UPDATE clients SET last_handshake = MAX(last_handshake, ?) WHERE id = ?",
+                    (stamp, client["id"]),
+                )
 
     # ------------------------------------------------------------ planes
 
@@ -262,7 +388,12 @@ class Panel:
             self._record_sale(conn, client_id, name, plan, "nuevo")
             self._connect(conn, self._client(conn, client_id))
             self._reshape(conn)
-            return client_id
+        if self.outline():
+            try:
+                self.create_outline_key(client_id)
+            except PanelError as exc:
+                log.error("No se pudo crear la clave Outline de %s: %s", name, exc)
+        return client_id
 
     def recharge(self, client_id: int, plan_id: int) -> None:
         """Vende un paquete a un cliente existente: suma GB (y días si el plan caduca).
@@ -338,6 +469,13 @@ class Panel:
                 "UPDATE clients SET name = ?, note = ? WHERE id = ?",
                 (name.strip(), note.strip(), client_id),
             )
+            client = self._client(conn, client_id)
+        api = self.outline() if client["outline_key_id"] else None
+        if api:
+            try:
+                api.rename_key(client["outline_key_id"], f"{client['name']} (#{client_id})")
+            except OutlineError as exc:
+                log.error("Outline: %s", exc)
 
     def pause(self, client_id: int) -> None:
         self.collect_usage()  # guarda lo consumido antes de quitar el peer
@@ -359,6 +497,12 @@ class Panel:
             client = self._client(conn, client_id)
             if client["status"] == ACTIVE:
                 self.wg.remove_peer(client["public_key"])
+            api = self.outline() if client["outline_key_id"] else None
+            if api:
+                try:
+                    api.delete_key(client["outline_key_id"])
+                except OutlineError as exc:
+                    raise PanelError(f"No se pudo borrar la clave en Outline: {exc}")
             conn.execute("UPDATE sales SET client_id = NULL WHERE client_id = ?", (client_id,))
             conn.execute("DELETE FROM clients WHERE id = ?", (client_id,))
             self._reshape(conn)
@@ -429,19 +573,21 @@ class Panel:
             if peer:
                 pend_up = peer.rx - c["last_rx"] if peer.rx >= c["last_rx"] else peer.rx
                 pend_down = peer.tx - c["last_tx"] if peer.tx >= c["last_tx"] else peer.tx
-            handshake = peer.latest_handshake if peer else c["last_handshake"]
+            handshake = max(peer.latest_handshake if peer else 0, c["last_handshake"])
             result.append({
                 "id": c["id"],
                 "name": c["name"],
                 "status": c["status"],
                 "address": c["address"],
                 "endpoint": (peer.endpoint if peer and peer.endpoint else c["endpoint"]),
-                "online": bool(peer) and handshake > online_since,
+                "online": c["status"] == ACTIVE and handshake > online_since,
                 "last_handshake": handshake,
-                "down_rate": down_rate,          # bytes/s
+                "down_rate": down_rate,          # bytes/s (sólo WireGuard)
                 "up_rate": up_rate,
                 "down_bytes": c["down_bytes"] + pend_down,
                 "up_bytes": c["up_bytes"] + pend_up,
+                "outline_bytes": c["outline_bytes"],
+                "has_outline": bool(c["outline_key_id"]),
                 "used_bytes": c["used_bytes"] + pend_down + pend_up,
                 "quota_bytes": c["quota_bytes"],
                 "down_mbps": c["down_mbps"],
@@ -453,28 +599,28 @@ class Panel:
         """Consumo por día de los últimos `days` días (de un cliente o de todos)."""
         today = now().date()
         start = today - timedelta(days=days - 1)
-        sql = ("SELECT day, SUM(down_bytes) AS down, SUM(up_bytes) AS up FROM usage_daily "
-               "WHERE day >= ?")
+        sql = ("SELECT day, SUM(down_bytes) AS down, SUM(up_bytes) AS up, SUM(ol_bytes) AS ol "
+               "FROM usage_daily WHERE day >= ?")
         args: list = [start.isoformat()]
         if client_id is not None:
             sql += " AND client_id = ?"
             args.append(client_id)
         with self.db.connect() as conn:
-            found = {r["day"]: (r["down"], r["up"])
+            found = {r["day"]: (r["down"], r["up"], r["ol"])
                      for r in conn.execute(sql + " GROUP BY day", args)}
         out = []
         for i in range(days):
             d: date = start + timedelta(days=i)
-            down, up = found.get(d.isoformat(), (0, 0))
-            out.append({"day": d.isoformat(), "down": down, "up": up})
+            down, up, ol = found.get(d.isoformat(), (0, 0, 0))
+            out.append({"day": d.isoformat(), "down": down, "up": up, "ol": ol})
         return out
 
     def top_consumers(self, day: str | None = None, limit: int = 5):
         day = day or now().strftime("%Y-%m-%d")
         with self.db.connect() as conn:
             return conn.execute(
-                "SELECT c.id, c.name, u.down_bytes, u.up_bytes, "
-                "u.down_bytes + u.up_bytes AS total FROM usage_daily u "
+                "SELECT c.id, c.name, u.down_bytes, u.up_bytes, u.ol_bytes, "
+                "u.down_bytes + u.up_bytes + u.ol_bytes AS total FROM usage_daily u "
                 "JOIN clients c ON c.id = u.client_id WHERE u.day = ? "
                 "ORDER BY total DESC LIMIT ?",
                 (day, limit),
@@ -483,7 +629,8 @@ class Panel:
     def month_traffic(self) -> int:
         with self.db.connect() as conn:
             return conn.execute(
-                "SELECT COALESCE(SUM(down_bytes + up_bytes), 0) FROM usage_daily WHERE day LIKE ?",
+                "SELECT COALESCE(SUM(down_bytes + up_bytes + ol_bytes), 0) FROM usage_daily "
+                "WHERE day LIKE ?",
                 (now().strftime("%Y-%m") + "%",),
             ).fetchone()[0]
 

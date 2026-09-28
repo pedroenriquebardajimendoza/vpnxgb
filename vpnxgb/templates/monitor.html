@@ -41,13 +41,13 @@
 <table class="monitor-table">
   <thead><tr>
     <th>Cliente</th><th class="num">↓ Ahora</th><th class="num">↑ Ahora</th>
-    <th class="num">Consumo</th><th class="num">↓ Total</th><th class="num">↑ Total</th>
+    <th class="num">Consumo</th><th class="num">↓ Total</th><th class="num">↑ Total</th><th class="num">Outline</th>
     <th>IP VPN</th><th>IP real</th><th>Límite</th><th>Última conexión</th>
   </tr></thead>
-  <tbody id="rows"><tr><td colspan="10" class="muted">Cargando…</td></tr></tbody>
+  <tbody id="rows"><tr><td colspan="11" class="muted">Cargando…</td></tr></tbody>
 </table>
 </div>
-<p class="small muted">Se actualiza cada 2 segundos. "IP real" es la dirección desde donde se conecta el cliente (su línea de ETECSA, wifi, etc.).</p>
+<p class="small muted">Se actualiza cada 2 segundos. "IP real" es la dirección desde donde se conecta el cliente (su línea de ETECSA, wifi, etc.). La velocidad en vivo es sólo de WireGuard; lo de Outline se suma cada minuto.</p>
 
 <script src="/static/charts.js"></script>
 <script>
@@ -101,7 +101,7 @@
     const body = $("rows");
     body.textContent = "";
     if (!list.length) {
-      const tr = body.insertRow(); const c = td("No hay clientes que mostrar.", "muted"); c.colSpan = 10; tr.appendChild(c);
+      const tr = body.insertRow(); const c = td("No hay clientes que mostrar.", "muted"); c.colSpan = 11; tr.appendChild(c);
       return;
     }
     for (const c of list) {
@@ -122,6 +122,7 @@
       tr.appendChild(td(fmtBytes(c.used_bytes) + " / " + fmtBytes(c.quota_bytes) + " (" + Math.min(pct, 100).toFixed(0) + "%)", "num"));
       tr.appendChild(td(fmtBytes(c.down_bytes), "num"));
       tr.appendChild(td(fmtBytes(c.up_bytes), "num"));
+      tr.appendChild(td(c.has_outline ? fmtBytes(c.outline_bytes) : "—", "num"));
       tr.appendChild(td(c.address, "mono"));
       tr.appendChild(td(c.endpoint ? c.endpoint.replace(/:\d+$/, "") : "—", "mono"));
       tr.appendChild(td("↓" + speed(c.down_mbps) + " ↑" + speed(c.up_mbps)));

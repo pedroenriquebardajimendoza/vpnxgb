@@ -40,20 +40,32 @@
 
 <section class="card" style="margin-top:1.6rem">
   <h2>Consumo de todos los clientes (30 días)</h2>
-  <div class="legend"><span><i class="sw s1"></i>Bajada</span><span><i class="sw s2"></i>Subida</span></div>
+  <div class="legend"><span><i class="sw s1"></i>Bajada</span><span><i class="sw s2"></i>Subida</span><span><i class="sw s3"></i>Outline</span></div>
   <div class="viz" id="d-chart"></div>
+  <details class="table-view"><summary>Ver como tabla</summary>
+    <div class="table"><table>
+      <thead><tr><th>Día</th><th class="num">Bajada</th><th class="num">Subida</th><th class="num">Outline</th><th class="num">Total</th></tr></thead>
+      <tbody>
+      {% for d in history|reverse if d.down or d.up or d.ol %}
+      <tr><td>{{ d.day[8:10] }}/{{ d.day[5:7] }}</td><td class="num">{{ d.down|bytes }}</td><td class="num">{{ d.up|bytes }}</td><td class="num">{{ d.ol|bytes }}</td><td class="num">{{ (d.down + d.up + d.ol)|bytes }}</td></tr>
+      {% else %}
+      <tr><td colspan="5" class="muted">Sin consumo todavía.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </details>
 </section>
 
 <h2>Los que más consumen hoy</h2>
 <div class="table">
 <table>
-  <thead><tr><th>Cliente</th><th class="num">Bajada</th><th class="num">Subida</th><th class="num">Total hoy</th></tr></thead>
+  <thead><tr><th>Cliente</th><th class="num">Bajada</th><th class="num">Subida</th><th class="num">Outline</th><th class="num">Total hoy</th></tr></thead>
   <tbody>
   {% for t in top %}
   <tr><td><a href="/clients/{{ t.id }}">{{ t.name }}</a></td><td class="num">{{ t.down_bytes|bytes }}</td>
-      <td class="num">{{ t.up_bytes|bytes }}</td><td class="num"><b>{{ t.total|bytes }}</b></td></tr>
+      <td class="num">{{ t.up_bytes|bytes }}</td><td class="num">{{ t.ol_bytes|bytes }}</td><td class="num"><b>{{ t.total|bytes }}</b></td></tr>
   {% else %}
-  <tr><td colspan="4" class="muted">Nadie ha consumido todavía hoy.</td></tr>
+  <tr><td colspan="5" class="muted">Nadie ha consumido todavía hoy.</td></tr>
   {% endfor %}
   </tbody>
 </table>

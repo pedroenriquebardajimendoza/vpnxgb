@@ -144,9 +144,16 @@ class Database:
             ("down_bytes", "INTEGER NOT NULL DEFAULT 0"),
             ("up_bytes", "INTEGER NOT NULL DEFAULT 0"),
             ("endpoint", "TEXT NOT NULL DEFAULT ''"),
+            ("outline_key_id", "TEXT"),
+            ("outline_url", "TEXT"),
+            ("outline_bytes", "INTEGER NOT NULL DEFAULT 0"),
+            ("ol_last", "INTEGER NOT NULL DEFAULT 0"),
         ):
             if name not in columns:
                 conn.execute(f"ALTER TABLE clients ADD COLUMN {name} {ddl}")
+        daily = {r["name"] for r in conn.execute("PRAGMA table_info(usage_daily)")}
+        if "ol_bytes" not in daily:
+            conn.execute("ALTER TABLE usage_daily ADD COLUMN ol_bytes INTEGER NOT NULL DEFAULT 0")
         if "plan_id" not in columns:
             # Último plan comprado por cada cliente, deducido de sus ventas.
             conn.execute("ALTER TABLE clients ADD COLUMN plan_id INTEGER")

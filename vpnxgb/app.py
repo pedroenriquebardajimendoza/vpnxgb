@@ -275,6 +275,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             sales=sales,
             expires=parse_time(client["expires_at"]),
             history=panel.history(client_id, days=30),
+            outline_on=bool(panel.outline_config()),
         )
 
     def _filename(client) -> str:
@@ -298,6 +299,22 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         buf = io.BytesIO()
         img.save(buf)
         return Response(buf.getvalue(), media_type="image/svg+xml")
+
+    @app.get("/clients/{client_id}/outline-qr.svg")
+    def client_outline_qr(client_id: int):
+        client = panel.get_client(client_id)
+        if not client["outline_url"]:
+            return Response(status_code=404)
+        img = qrcode.make(client["outline_url"],
+                          image_factory=qrcode.image.svg.SvgPathFillImage, box_size=8)
+        buf = io.BytesIO()
+        img.save(buf)
+        return Response(buf.getvalue(), media_type="image/svg+xml")
+
+    @app.post("/clients/{client_id}/outline")
+    def client_outline(request: Request, client_id: int):
+        return run(request, f"/clients/{client_id}", lambda: panel.create_outline_key(client_id),
+                   "Clave Outline creada")
 
     @app.post("/clients/{client_id}/pause")
     def client_pause(request: Request, client_id: int):
@@ -393,6 +410,36 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     @app.post("/plans/{plan_id}/delete")
     def plan_delete(request: Request, plan_id: int):
         return run(request, "/plans", lambda: panel.delete_plan(plan_id), "Plan eliminado")
+
+    # ------------------------------------------------------------ ajustes
+
+    @app.get("/settings", response_class=HTMLResponse)
+    def settings_page(request: Request):
+        cfg = panel.outline_config()
+        missing = sum(1 for c in panel.list_clients() if not c["outline_key_id"])
+        host = cfg["apiUrl"].split("/")[2] if cfg else ""
+        return render(request, "settings.html", outline=cfg, outline_host=host, missing=missing)
+
+    @app.post("/settings/outline")
+    def settings_outline(request: Request, config: str = Form(...)):
+        return run(request, "/settings", lambda: panel.configure_outline(config),
+                   "Outline conectado. Ya puedes crear claves.")
+
+    @app.post("/settings/outline/keys")
+    def settings_outline_keys(request: Request):
+        result = {}
+
+        def action():
+            result["n"] = panel.create_missing_outline_keys()
+
+        response = run(request, "/settings", action, "")
+        if "n" in result:
+            flash(request, f"Se crearon {result['n']} clave(s) Outline")
+        return response
+
+    @app.post("/settings/outline/remove")
+    def settings_outline_remove(request: Request):
+        return run(request, "/settings", panel.remove_outline, "Outline desconectado del panel")
 
     # ------------------------------------------------------------ ventas
 
