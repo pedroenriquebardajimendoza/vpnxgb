@@ -70,6 +70,15 @@ DEFAULT_PLANS = [
     ("10 GB", 10, 3000),
 ]
 
+# Velocidades recomendadas (bajada, subida) en Mbps. Se ponen una sola vez y sólo
+# si el plan aún no tiene límite, para no pisar lo que el dueño haya configurado.
+RECOMMENDED_SPEEDS = {
+    "Prueba gratis": (1, 1),
+    "3 GB": (5, 2),
+    "6 GB": (10, 3),
+    "10 GB": (50, 10),
+}
+
 
 class Database:
     def __init__(self, path: str):
@@ -108,6 +117,24 @@ class Database:
                     "INSERT INTO plans (name, gb, price_cup) VALUES (?, ?, ?)", TRIAL_PLAN
                 )
                 self._mark(conn, "seed_trial_plan")
+            if not self._done(conn, "seed_plan_speeds"):
+                self._seed_speeds(conn)
+                self._mark(conn, "seed_plan_speeds")
+
+    @staticmethod
+    def _seed_speeds(conn) -> None:
+        for name, (down, up) in RECOMMENDED_SPEEDS.items():
+            conn.execute(
+                "UPDATE plans SET down_mbps = ?, up_mbps = ? "
+                "WHERE name = ? AND down_mbps = 0 AND up_mbps = 0",
+                (down, up, name),
+            )
+            # Los clientes que ya tenían ese plan y seguían sin límite también.
+            conn.execute(
+                "UPDATE clients SET down_mbps = ?, up_mbps = ? WHERE down_mbps = 0 "
+                "AND up_mbps = 0 AND plan_id IN (SELECT id FROM plans WHERE name = ?)",
+                (down, up, name),
+            )
 
     @staticmethod
     def _migrate(conn) -> None:
@@ -120,6 +147,14 @@ class Database:
         ):
             if name not in columns:
                 conn.execute(f"ALTER TABLE clients ADD COLUMN {name} {ddl}")
+        if "plan_id" not in columns:
+            # Último plan comprado por cada cliente, deducido de sus ventas.
+            conn.execute("ALTER TABLE clients ADD COLUMN plan_id INTEGER")
+            conn.execute(
+                "UPDATE clients SET plan_id = (SELECT p.id FROM sales s "
+                "JOIN plans p ON p.name = s.plan_name WHERE s.client_id = clients.id "
+                "ORDER BY s.id DESC LIMIT 1)"
+            )
 
     @staticmethod
     def _done(conn, key: str) -> bool:

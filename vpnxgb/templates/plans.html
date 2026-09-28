@@ -21,9 +21,15 @@
 {% for p in plans %}
 <section class="card {% if not p.active %}dim{% endif %}">
   {{ plan_form(p) }}
+  <div class="actions" style="margin-top:0">
+  <form method="post" action="/plans/{{ p.id }}/apply-speed"
+        onsubmit="return confirm('¿Poner ↓ {{ p.down_mbps|speed }} / ↑ {{ p.up_mbps|speed }} a los {{ p.clients }} cliente(s) de este plan? Guarda antes el plan si cambiaste la velocidad.')">
+    <button class="btn small" {% if not p.clients %}disabled{% endif %}>Aplicar velocidad a sus {{ p.clients }} cliente(s)</button>
+  </form>
   <form method="post" action="/plans/{{ p.id }}/delete" onsubmit="return confirm('¿Eliminar este plan? Los clientes que ya lo compraron no se ven afectados.')">
     <button class="btn danger small">Eliminar plan</button>
   </form>
+  </div>
 </section>
 {% endfor %}
 

@@ -174,10 +174,22 @@ class Panel:
 
     def list_plans(self, only_active: bool = False):
         with self.db.connect() as conn:
-            sql = "SELECT * FROM plans"
+            sql = ("SELECT p.*, (SELECT COUNT(*) FROM clients c WHERE c.plan_id = p.id) "
+                   "AS clients FROM plans p")
             if only_active:
-                sql += " WHERE active = 1"
-            return conn.execute(sql + " ORDER BY gb").fetchall()
+                sql += " WHERE p.active = 1"
+            return conn.execute(sql + " ORDER BY p.gb").fetchall()
+
+    def apply_plan_speed(self, plan_id: int) -> int:
+        """Pone la velocidad del plan a todos los clientes cuyo último paquete es ese plan."""
+        with self.lock, self.db.connect() as conn:
+            plan = self._plan(conn, plan_id)
+            n = conn.execute(
+                "UPDATE clients SET down_mbps = ?, up_mbps = ? WHERE plan_id = ?",
+                (plan["down_mbps"], plan["up_mbps"], plan_id),
+            ).rowcount
+            self._reshape(conn)
+            return n
 
     def save_plan(self, plan_id: int | None, name: str, gb: float, price_cup: int,
                   days: int, down_mbps: float, up_mbps: float, active: bool) -> None:
@@ -240,11 +252,11 @@ class Panel:
             expires = (now() + timedelta(days=plan["days"])).strftime(TIME_FMT) if plan["days"] else None
             cur = conn.execute(
                 "INSERT INTO clients (name, note, private_key, public_key, preshared_key, address, "
-                "quota_bytes, down_mbps, up_mbps, status, expires_at, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "quota_bytes, down_mbps, up_mbps, status, expires_at, created_at, plan_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (name, note.strip(), private, public, generate_preshared_key(), address,
                  int(plan["gb"] * GB), plan["down_mbps"], plan["up_mbps"], ACTIVE, expires,
-                 now().strftime(TIME_FMT)),
+                 now().strftime(TIME_FMT), plan_id),
             )
             client_id = cur.lastrowid
             self._record_sale(conn, client_id, name, plan, "nuevo")
@@ -270,9 +282,9 @@ class Panel:
             else:
                 expires = None
             conn.execute(
-                "UPDATE clients SET quota_bytes = ?, expires_at = ?, down_mbps = ?, up_mbps = ? "
-                "WHERE id = ?",
-                (quota, expires, plan["down_mbps"], plan["up_mbps"], client_id),
+                "UPDATE clients SET quota_bytes = ?, expires_at = ?, down_mbps = ?, up_mbps = ?, "
+                "plan_id = ? WHERE id = ?",
+                (quota, expires, plan["down_mbps"], plan["up_mbps"], plan_id, client_id),
             )
             self._record_sale(conn, client_id, client["name"], plan, "recarga")
             client = self._client(conn, client_id)

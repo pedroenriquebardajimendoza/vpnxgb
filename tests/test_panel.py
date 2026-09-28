@@ -239,6 +239,13 @@ def test_migration_adds_trial_plan_once(tmp_path):
         "quota_bytes INTEGER, used_bytes INTEGER, down_mbps REAL, up_mbps REAL, status TEXT, "
         "expires_at TEXT, created_at TEXT, last_rx INTEGER, last_tx INTEGER, "
         "last_handshake INTEGER);"
+        "INSERT INTO clients (name, public_key, address, down_mbps, up_mbps) "
+        "VALUES ('Antiguo', 'pk1', '10.8.0.2', 0, 0);"
+        "CREATE TABLE sales (id INTEGER PRIMARY KEY AUTOINCREMENT, client_id INTEGER, "
+        "client_name TEXT, plan_name TEXT, kind TEXT, gb REAL, price_cup INTEGER, "
+        "created_at TEXT);"
+        "INSERT INTO sales (client_id, client_name, plan_name, kind, gb, price_cup) "
+        "VALUES (1, 'Antiguo', '3 GB', 'nuevo', 3, 1000);"
     )
     conn.close()
     db = Database(str(path))
@@ -248,7 +255,11 @@ def test_migration_adds_trial_plan_once(tmp_path):
         names = [r["name"] for r in c.execute("SELECT name FROM plans")]
         cols = {r["name"] for r in c.execute("PRAGMA table_info(clients)")}
     assert names.count("Prueba gratis") == 1
-    assert {"down_bytes", "up_bytes", "endpoint"} <= cols
+    assert {"down_bytes", "up_bytes", "endpoint", "plan_id"} <= cols
+    with db.connect() as c:
+        old = c.execute("SELECT plan_id, down_mbps, up_mbps FROM clients").fetchone()
+        three = c.execute("SELECT id FROM plans WHERE name = '3 GB'").fetchone()[0]
+    assert (old["plan_id"], old["down_mbps"], old["up_mbps"]) == (three, 5, 2)
 
 
 def test_monitor_pages(app, panel):
@@ -285,4 +296,44 @@ def test_trial_speed_limit_is_lifted_by_paid_recharge(panel):
     assert any("rate 1000kbit" in x for x in flat)
     panel.recharge(cid, plan_id(panel, "3 GB"))
     c = panel.get_client(cid)
-    assert (c["down_mbps"], c["up_mbps"]) == (0, 0)
+    assert (c["down_mbps"], c["up_mbps"]) == (5, 2)
+    assert c["plan_id"] == plan_id(panel, "3 GB")
+
+
+def test_recommended_speeds_and_apply_to_plan_clients(panel):
+    speeds = {p["name"]: (p["down_mbps"], p["up_mbps"]) for p in panel.list_plans()}
+    assert speeds == {"Prueba gratis": (1, 1), "3 GB": (5, 2), "6 GB": (10, 3), "10 GB": (50, 10)}
+    six = plan_id(panel, "6 GB")
+    a = panel.create_client("A", six)
+    b = panel.create_client("B", six)
+    other = panel.create_client("C", plan_id(panel, "3 GB"))
+    panel.save_plan(six, "6 GB", 6, 1500, 0, 20, 4, True)
+    assert panel.apply_plan_speed(six) == 2
+    assert (panel.get_client(a)["down_mbps"], panel.get_client(b)["up_mbps"]) == (20, 4)
+    assert panel.get_client(other)["down_mbps"] == 5
+    assert next(p for p in panel.list_plans() if p["id"] == six)["clients"] == 2
+
+
+def test_upgrade_sets_speeds_on_existing_clients(tmp_path):
+    from vpnxgb.db import Database
+
+    db = Database(str(tmp_path / "up.db"))
+    db.init()
+    with db.connect() as c:
+        # Simula una instalación anterior: planes y cliente sin límite, sin plan_id.
+        c.execute("UPDATE plans SET down_mbps = 0, up_mbps = 0")
+        c.execute("DELETE FROM settings WHERE key = 'seed_plan_speeds'")
+        c.execute(
+            "INSERT INTO clients (name, private_key, public_key, preshared_key, address) "
+            "VALUES ('Viejo', 'k', 'pk', 'psk', '10.8.0.9')"
+        )
+        c.execute(
+            "INSERT INTO sales (client_id, client_name, plan_name, kind, gb, price_cup) "
+            "VALUES (1, 'Viejo', '10 GB', 'nuevo', 10, 3000)"
+        )
+    with db.connect() as c:  # quitar la columna plan_id no es posible; se simula vacía
+        c.execute("UPDATE clients SET plan_id = (SELECT id FROM plans WHERE name = '10 GB')")
+    db.init()
+    with db.connect() as c:
+        row = c.execute("SELECT down_mbps, up_mbps FROM clients WHERE name = 'Viejo'").fetchone()
+    assert (row["down_mbps"], row["up_mbps"]) == (50, 10)

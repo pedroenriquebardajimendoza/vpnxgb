@@ -271,6 +271,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             c=client,
             config=panel.client_config(client),
             plans=panel.list_plans(only_active=True),
+            plan=next((p for p in panel.list_plans() if p["id"] == client["plan_id"]), None),
             sales=sales,
             expires=parse_time(client["expires_at"]),
             history=panel.history(client_id, days=30),
@@ -376,6 +377,18 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             ),
             "Plan guardado",
         )
+
+    @app.post("/plans/{plan_id}/apply-speed")
+    def plan_apply_speed(request: Request, plan_id: int):
+        result = {}
+
+        def action():
+            result["n"] = panel.apply_plan_speed(plan_id)
+
+        response = run(request, "/plans", action, "")
+        if "n" in result:
+            flash(request, f"Velocidad aplicada a {result['n']} cliente(s)")
+        return response
 
     @app.post("/plans/{plan_id}/delete")
     def plan_delete(request: Request, plan_id: int):
