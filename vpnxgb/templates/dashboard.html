@@ -1,14 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Inicio<script src="/static/charts.js"></script>
-<script>
-(function () {
-  const days = {{ history|tojson }};
-  const host = document.getElementById("d-chart");
-  window.VizCharts.dailyChart(host, days);
-  window.addEventListener("resize", () => window.VizCharts.dailyChart(host, days));
-})();
-</script>
-{% endblock %}
+{% block title %}Inicio{% endblock %}
 {% block content %}
 <div class="row between">
   <h1>Inicio</h1>

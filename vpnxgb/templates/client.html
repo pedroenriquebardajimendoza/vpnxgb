@@ -1,52 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ c.name }}<script src="/static/charts.js"></script>
-<script>
-(function () {
-  const { liveChart, dailyChart, fmtBytes, fmtRate } = window.VizCharts;
-  const $ = id => document.getElementById(id);
-  const daily = {{ history|tojson }};
-  const points = [];
-  dailyChart($("d-chart"), daily);
-  window.addEventListener("resize", () => { dailyChart($("d-chart"), daily); liveChart($("l-chart"), points); });
-
-  function ago(ts) {
-    if (!ts) return "Nunca";
-    const s = Math.floor(Date.now() / 1000) - ts;
-    if (s < 180) return "En línea";
-    if (s < 3600) return "hace " + Math.floor(s / 60) + " min";
-    if (s < 86400) return "hace " + Math.floor(s / 3600) + " h";
-    return "hace " + Math.floor(s / 86400) + " días";
-  }
-  async function tick() {
-    let data;
-    try {
-      const r = await fetch("/api/live?client={{ c.id }}", { cache: "no-store" });
-      if (r.status === 401) { location.href = "/login"; return; }
-      data = await r.json();
-    } catch (e) { $("l-clock").textContent = "sin conexión"; return; }
-    const c = data.clients[0];
-    if (!c) return;
-    $("l-clock").textContent = "en vivo · " + data.time;
-    $("l-down-rate").textContent = fmtRate(c.down_rate);
-    $("l-up-rate").textContent = fmtRate(c.up_rate);
-    $("l-down").textContent = fmtBytes(c.down_bytes);
-    $("l-up").textContent = fmtBytes(c.up_bytes);
-    $("l-used").textContent = fmtBytes(c.used_bytes) + " de " + fmtBytes(c.quota_bytes);
-    $("l-left").textContent = fmtBytes(Math.max(0, c.quota_bytes - c.used_bytes));
-    $("l-seen").textContent = ago(c.last_handshake);
-    if (c.endpoint) $("l-endpoint").textContent = c.endpoint.replace(/:\d+$/, "");
-    const pct = c.quota_bytes ? 100 * c.used_bytes / c.quota_bytes : 100;
-    $("l-bar").style.width = Math.min(100, pct).toFixed(1) + "%";
-    $("l-bar").className = pct >= 90 ? "hot" : "";
-    points.push({ t: data.time, down: c.down_rate, up: c.up_rate });
-    if (points.length > 60) points.shift();
-    liveChart($("l-chart"), points);
-  }
-  tick();
-  setInterval(tick, 2000);
-})();
-</script>
-{% endblock %}
+{% block title %}{{ c.name }}{% endblock %}
 {% block content %}
 {% set pct = (100 * c.used_bytes / c.quota_bytes) if c.quota_bytes else 100 %}
 {% set left = c.quota_bytes - c.used_bytes %}

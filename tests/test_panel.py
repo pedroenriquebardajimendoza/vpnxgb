@@ -337,3 +337,13 @@ def test_upgrade_sets_speeds_on_existing_clients(tmp_path):
     with db.connect() as c:
         row = c.execute("SELECT down_mbps, up_mbps FROM clients WHERE name = 'Viejo'").fetchone()
     assert (row["down_mbps"], row["up_mbps"]) == (50, 10)
+
+
+def test_page_titles_are_clean(app, panel):
+    cid = panel.create_client("Titulo", plan_id(panel, "3 GB"))
+    with TestClient(app) as web:
+        web.post("/login", data={"username": "admin", "password": "secreto"})
+        for page in ("/", "/monitor", "/clients", f"/clients/{cid}", "/plans", "/sales"):
+            html = web.get(page).text
+            title = html[html.index("<title>"):html.index("</title>")]
+            assert "<script" not in title, page
