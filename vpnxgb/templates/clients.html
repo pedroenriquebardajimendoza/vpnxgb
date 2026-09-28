@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Clientes{% endblock %}
+{% block content %}
+<div class="row between">
+  <h1>Clientes</h1>
+  <a class="btn primary" href="/clients/new">+ Nuevo cliente</a>
+</div>
+
+<form class="filters" method="get" action="/clients">
+  <input name="q" value="{{ q }}" placeholder="Buscar por nombre, nota o IP">
+  <select name="status" onchange="this.form.submit()">
+    <option value="">Todos</option>
+    {% for key, label in STATUS_LABELS.items() %}
+    <option value="{{ key }}" {% if status == key %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <button class="btn" type="submit">Buscar</button>
+</form>
+
+<div class="list">
+{% for c in clients %}
+  {% set pct = (100 * c.used_bytes / c.quota_bytes) if c.quota_bytes else 100 %}
+  <a class="item" href="/clients/{{ c.id }}">
+    <div class="row between">
+      <b>{{ c.name }}</b>
+      <span class="chip {{ c.status }}">{{ STATUS_LABELS[c.status] }}</span>
+    </div>
+    <div class="bar"><i style="width: {{ [pct, 100]|min|round(1) }}%" class="{% if pct >= 90 %}hot{% endif %}"></i></div>
+    <div class="row between small muted">
+      <span>{{ c.used_bytes|bytes }} de {{ c.quota_bytes|bytes }}</span>
+      <span>{{ c.last_handshake|ago }}</span>
+    </div>
+    {% if c.note %}<div class="small muted">{{ c.note }}</div>{% endif %}
+  </a>
+{% else %}
+  <p class="muted">No hay clientes{% if status or q %} con ese filtro{% endif %}.</p>
+{% endfor %}
+</div>
+{% endblock %}

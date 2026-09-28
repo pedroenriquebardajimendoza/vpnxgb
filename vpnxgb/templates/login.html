@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Entrar{% endblock %}
+{% block content %}
+<div class="login">
+  <h1 class="brand big">VPN<span>x</span>GB</h1>
+  <form method="post" action="/login" class="card">
+    <label>Usuario <input name="username" autocomplete="username" required autofocus></label>
+    <label>Contraseña <input name="password" type="password" autocomplete="current-password" required></label>
+    <button class="btn primary" type="submit">Entrar</button>
+  </form>
+</div>
+{% endblock %}

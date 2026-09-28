@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Nuevo cliente{% endblock %}
+{% block content %}
+<h1>Nuevo cliente</h1>
+<form method="post" action="/clients/new" class="card">
+  <label>Nombre del cliente
+    <input name="name" required autofocus placeholder="Ej. Juan Pérez"></label>
+  <label>Nota (teléfono, cómo pagó, etc.)
+    <input name="note" placeholder="Ej. 5355555555 · Transfermóvil"></label>
+  <fieldset>
+    <legend>Paquete</legend>
+    <div class="plans-grid">
+    {% for p in plans %}
+      <label class="plan pick">
+        <input type="radio" name="plan_id" value="{{ p.id }}" required
+               {% if selected == p.id or (not selected and loop.first) %}checked{% endif %}>
+        <b>{{ p.name }}</b>
+        <span class="price">{{ p.price_cup|cup }} CUP</span>
+        <small>{{ "%g"|format(p.gb) }} GB{% if p.days %} · {{ p.days }} días{% endif %}
+          {% if p.down_mbps or p.up_mbps %}<br>↓ {{ p.down_mbps|speed }} · ↑ {{ p.up_mbps|speed }}{% endif %}</small>
+      </label>
+    {% else %}
+      <p class="muted">No hay planes activos. <a href="/plans">Crea uno</a>.</p>
+    {% endfor %}
+    </div>
+  </fieldset>
+  <button class="btn primary" type="submit">Crear y registrar venta</button>
+</form>
+{% endblock %}

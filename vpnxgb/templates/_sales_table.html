@@ -1,0 +1,19 @@
+{% set rows = recent if recent is defined else sales %}
+<div class="table">
+<table>
+  <thead><tr><th>Fecha</th><th>Cliente</th><th>Plan</th><th>Tipo</th><th class="num">CUP</th></tr></thead>
+  <tbody>
+  {% for s in rows %}
+  <tr>
+    <td>{{ s.created_at[:16] }}</td>
+    <td>{% if s.client_id %}<a href="/clients/{{ s.client_id }}">{{ s.client_name }}</a>{% else %}{{ s.client_name }}{% endif %}</td>
+    <td>{{ s.plan_name }}</td>
+    <td>{{ "Nuevo" if s.kind == "nuevo" else "Recarga" }}</td>
+    <td class="num">{{ s.price_cup|cup }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="5" class="muted">Todavía no hay ventas.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>

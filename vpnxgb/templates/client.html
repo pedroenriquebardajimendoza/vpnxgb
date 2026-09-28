@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }}{% endblock %}
+{% block content %}
+{% set pct = (100 * c.used_bytes / c.quota_bytes) if c.quota_bytes else 100 %}
+{% set left = c.quota_bytes - c.used_bytes %}
+<div class="row between">
+  <h1>{{ c.name }} <span class="chip {{ c.status }}">{{ STATUS_LABELS[c.status] }}</span></h1>
+  <form method="post" action="/refresh"><input type="hidden" name="next" value="/clients/{{ c.id }}">
+    <button class="btn" type="submit">↻ Actualizar</button></form>
+</div>
+{% if c.note %}<p class="muted">{{ c.note }}</p>{% endif %}
+
+<section class="card">
+  <div class="row between"><b>Consumo</b><span>{{ c.used_bytes|bytes }} de {{ c.quota_bytes|bytes }}</span></div>
+  <div class="bar big"><i style="width: {{ [pct, 100]|min|round(1) }}%" class="{% if pct >= 90 %}hot{% endif %}"></i></div>
+  <div class="grid2 small">
+    <div><small class="muted">Le quedan</small><br><b>{{ (left if left > 0 else 0)|bytes }}</b></div>
+    <div><small class="muted">Última conexión</small><br><b>{{ c.last_handshake|ago }}</b></div>
+    <div><small class="muted">Vence</small><br><b>{{ expires.strftime("%d/%m/%Y %H:%M") if expires else "No vence" }}</b></div>
+    <div><small class="muted">IP interna</small><br><b>{{ c.address }}</b></div>
+    <div><small class="muted">Bajada</small><br><b>{{ c.down_mbps|speed }}</b></div>
+    <div><small class="muted">Subida</small><br><b>{{ c.up_mbps|speed }}</b></div>
+  </div>
+  <div class="actions">
+    {% if c.status == "activo" %}
+    <form method="post" action="/clients/{{ c.id }}/pause"><button class="btn warn">⏸ Pausar</button></form>
+    {% else %}
+    <form method="post" action="/clients/{{ c.id }}/resume"><button class="btn ok">▶ Activar</button></form>
+    {% endif %}
+    <a class="btn" href="/clients/{{ c.id }}/config">⬇ Descargar .conf</a>
+    <form method="post" action="/clients/{{ c.id }}/delete"
+          onsubmit="return confirm('¿Eliminar este cliente? Su configuración dejará de funcionar para siempre.')">
+      <button class="btn danger">🗑 Eliminar</button></form>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Recargar (venta)</h2>
+  <form method="post" action="/clients/{{ c.id }}/recharge" class="row wrap">
+    <select name="plan_id" required>
+      {% for p in plans %}
+      <option value="{{ p.id }}">{{ p.name }} — {{ p.price_cup|cup }} CUP{% if p.days %} · {{ p.days }} días{% endif %}</option>
+      {% endfor %}
+    </select>
+    <button class="btn primary">Recargar</button>
+  </form>
+  <p class="small muted">Suma los GB del plan a lo que le queda y reactiva la configuración si estaba agotada. El cliente sigue usando el mismo archivo / QR.</p>
+</section>
+
+<section class="card">
+  <h2>Velocidad</h2>
+  <form method="post" action="/clients/{{ c.id }}/speed" class="row wrap">
+    <label>Bajada (Mbps) <input name="down_mbps" type="number" step="0.1" min="0" value="{{ '%g'|format(c.down_mbps) }}"></label>
+    <label>Subida (Mbps) <input name="up_mbps" type="number" step="0.1" min="0" value="{{ '%g'|format(c.up_mbps) }}"></label>
+    <button class="btn">Guardar</button>
+  </form>
+  <p class="small muted">0 = sin límite.</p>
+</section>
+
+<section class="card">
+  <h2>Configuración para el cliente</h2>
+  <div class="qr"><img src="/clients/{{ c.id }}/qr.svg" alt="QR de WireGuard"></div>
+  <p class="small muted center">Escanéalo desde la app WireGuard: “+” → “Escanear código QR”.</p>
+  <textarea readonly rows="11" onclick="this.select()">{{ config }}</textarea>
+</section>
+
+<section class="card">
+  <h2>Ajustes avanzados</h2>
+  <form method="post" action="/clients/{{ c.id }}/adjust" class="row wrap">
+    <label>Sumar / restar GB (sin venta) <input name="gb" type="number" step="0.1" placeholder="Ej. 1 o -0.5" required></label>
+    <button class="btn">Aplicar</button>
+  </form>
+  <form method="post" action="/clients/{{ c.id }}/expiry" class="row wrap">
+    <label>Fecha de vencimiento <input name="expires" type="date" value="{{ expires.strftime('%Y-%m-%d') if expires else '' }}"></label>
+    <button class="btn">Guardar</button>
+  </form>
+  <p class="small muted">Deja la fecha vacía para que no venza.</p>
+  <form method="post" action="/clients/{{ c.id }}/info" class="row wrap">
+    <label>Nombre <input name="name" value="{{ c.name }}" required></label>
+    <label>Nota <input name="note" value="{{ c.note }}"></label>
+    <button class="btn">Guardar</button>
+  </form>
+  <form method="post" action="/clients/{{ c.id }}/reset" onsubmit="return confirm('¿Poner el consumo a cero?')">
+    <button class="btn">Poner consumo a 0</button>
+  </form>
+</section>
+
+<h2>Historial de compras</h2>
+{% include "_sales_table.html" with context %}
+{% endblock %}

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Ventas{% endblock %}
+{% block content %}
+<h1>Ventas</h1>
+<section class="stats">
+  <div class="stat"><small>Hoy</small><b>{{ summary.today.cup|cup }} CUP</b><span>{{ summary.today.n }} ventas</span></div>
+  <div class="stat"><small>Este mes</small><b>{{ summary.month.cup|cup }} CUP</b><span>{{ summary.month.n }} ventas · {{ "%g"|format(summary.month.gb) }} GB vendidos</span></div>
+</section>
+{% include "_sales_table.html" with context %}
+{% endblock %}

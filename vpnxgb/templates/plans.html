@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Planes{% endblock %}
+{% block content %}
+<h1>Planes</h1>
+<p class="muted">Los paquetes que vendes. Velocidad 0 = sin límite. Días 0 = no vence (dura hasta que se gasten los GB).</p>
+
+{% macro plan_form(p=None) %}
+<form method="post" action="/plans" class="plan-form">
+  <input type="hidden" name="plan_id" value="{{ p.id if p else 0 }}">
+  <label>Nombre <input name="name" value="{{ p.name if p else '' }}" required placeholder="Ej. 3 GB"></label>
+  <label>GB <input name="gb" type="number" step="0.1" min="0.1" value="{{ '%g'|format(p.gb) if p else '' }}" required></label>
+  <label>Precio (CUP) <input name="price_cup" type="number" min="0" value="{{ p.price_cup if p else '' }}" required></label>
+  <label>Días <input name="days" type="number" min="0" value="{{ p.days if p else 0 }}"></label>
+  <label>↓ Mbps <input name="down_mbps" type="number" step="0.1" min="0" value="{{ '%g'|format(p.down_mbps) if p else 0 }}"></label>
+  <label>↑ Mbps <input name="up_mbps" type="number" step="0.1" min="0" value="{{ '%g'|format(p.up_mbps) if p else 0 }}"></label>
+  <label class="check"><input type="checkbox" name="active" value="1" {% if not p or p.active %}checked{% endif %}> Activo</label>
+  <button class="btn {{ '' if p else 'primary' }}">{{ "Guardar" if p else "Añadir plan" }}</button>
+</form>
+{% endmacro %}
+
+{% for p in plans %}
+<section class="card {% if not p.active %}dim{% endif %}">
+  {{ plan_form(p) }}
+  <form method="post" action="/plans/{{ p.id }}/delete" onsubmit="return confirm('¿Eliminar este plan? Los clientes que ya lo compraron no se ven afectados.')">
+    <button class="btn danger small">Eliminar plan</button>
+  </form>
+</section>
+{% endfor %}
+
+<h2>Nuevo plan</h2>
+<section class="card">{{ plan_form() }}</section>
+{% endblock %}

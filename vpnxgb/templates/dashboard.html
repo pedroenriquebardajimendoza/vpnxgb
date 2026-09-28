@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Inicio{% endblock %}
+{% block content %}
+<div class="row between">
+  <h1>Inicio</h1>
+  <form method="post" action="/refresh"><input type="hidden" name="next" value="/">
+    <button class="btn" type="submit">↻ Actualizar consumo</button></form>
+</div>
+
+<section class="stats">
+  <div class="stat"><small>Ventas hoy</small><b>{{ summary.today.cup|cup }} CUP</b>
+    <span>{{ summary.today.n }} ventas · {{ "%g"|format(summary.today.gb) }} GB</span></div>
+  <div class="stat"><small>Ventas del mes</small><b>{{ summary.month.cup|cup }} CUP</b>
+    <span>{{ summary.month.n }} ventas · {{ "%g"|format(summary.month.gb) }} GB</span></div>
+  <div class="stat"><small>Clientes</small><b>{{ summary.total }}</b>
+    <span>{{ summary.online }} en línea ahora</span></div>
+  <div class="stat"><small>Tráfico consumido</small><b>{{ summary.used_bytes|bytes }}</b>
+    <span>total de todos los clientes</span></div>
+</section>
+
+<section class="chips">
+  {% for key, label in STATUS_LABELS.items() %}
+  <a class="chip {{ key }}" href="/clients?status={{ key }}">{{ label }}: {{ summary.counts.get(key, 0) }}</a>
+  {% endfor %}
+</section>
+
+<h2>Vender un paquete</h2>
+<section class="plans-grid">
+  {% for p in plans %}
+  <a class="plan" href="/clients/new?plan={{ p.id }}">
+    <b>{{ p.name }}</b>
+    <span class="price">{{ p.price_cup|cup }} CUP</span>
+    <small>{{ "%g"|format(p.gb) }} GB{% if p.days %} · {{ p.days }} días{% endif %}</small>
+  </a>
+  {% else %}
+  <p class="muted">No hay planes activos. <a href="/plans">Crea uno</a>.</p>
+  {% endfor %}
+</section>
+
+<h2>Últimas ventas</h2>
+{% include "_sales_table.html" with context %}
+{% endblock %}
