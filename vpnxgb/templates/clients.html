@@ -23,7 +23,7 @@
   <a class="item" href="/clients/{{ c.id }}">
     <div class="row between">
       <b>{{ c.name }}</b>
-      <span class="chip {{ c.status }}">{{ STATUS_LABELS[c.status] }}</span>
+      <span>{% if c.exit == "warp" %}<span class="chip">☁ Cloudflare</span> {% endif %}<span class="chip {{ c.status }}">{{ STATUS_LABELS[c.status] }}</span></span>
     </div>
     <div class="bar"><i style="width: {{ [pct, 100]|min|round(1) }}%" class="{% if pct >= 90 %}hot{% endif %}"></i></div>
     <div class="row between small muted">

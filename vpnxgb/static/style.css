@@ -188,3 +188,6 @@ details.table-view summary { cursor: pointer; color: var(--primary); font-size: 
 .live-badge::before { content: "●"; margin-right: 4px; animation: blink 1.5s infinite; }
 @keyframes blink { 50% { opacity: .3; } }
 .free { color: var(--ok); font-weight: 700; }
+.btn:disabled { opacity: .45; cursor: default; }
+.exit-pick { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.plan.pick.dim { opacity: .5; cursor: default; }

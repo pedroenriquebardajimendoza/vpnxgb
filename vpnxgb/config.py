@@ -30,6 +30,7 @@ class Settings:
     poll_seconds: int
     ifb_interface: str
     monthly_traffic_gb: float  # tráfico incluido en el VPS (para el aviso del mes)
+    warp_interface: str        # interfaz de Cloudflare WARP creada por warp.sh
 
 
 def load_settings() -> Settings:
@@ -51,4 +52,5 @@ def load_settings() -> Settings:
         poll_seconds=int(env("VPNXGB_POLL_SECONDS", "60")),
         ifb_interface=env("VPNXGB_IFB_INTERFACE", "ifb0"),
         monthly_traffic_gb=float(env("VPNXGB_MONTHLY_TRAFFIC_GB", "1000")),
+        warp_interface=env("VPNXGB_WARP_INTERFACE", "warp"),
     )

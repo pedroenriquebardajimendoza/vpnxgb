@@ -144,6 +144,7 @@ class Database:
             ("down_bytes", "INTEGER NOT NULL DEFAULT 0"),
             ("up_bytes", "INTEGER NOT NULL DEFAULT 0"),
             ("endpoint", "TEXT NOT NULL DEFAULT ''"),
+            ("exit", "TEXT NOT NULL DEFAULT 'server'"),  # server | warp
         ):
             if name not in columns:
                 conn.execute(f"ALTER TABLE clients ADD COLUMN {name} {ddl}")

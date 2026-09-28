@@ -21,6 +21,7 @@
     <div><small class="muted">IP real (desde donde se conecta)</small><br><b id="l-endpoint" class="mono">{{ c.endpoint.rsplit(":", 1)[0] if c.endpoint else "—" }}</b></div>
     <div><small class="muted">Vence</small><br><b>{{ expires.strftime("%d/%m/%Y %H:%M") if expires else "No vence" }}</b></div>
     <div><small class="muted">IP interna</small><br><b>{{ c.address }}</b></div>
+    <div><small class="muted">Salida</small><br><b>{{ "☁ Cloudflare" if c.exit == "warp" else "Servidor" }}</b></div>
     <div><small class="muted">Plan actual</small><br><b>{{ plan.name if plan else "—" }}</b></div>
     <div><small class="muted">Límite de bajada</small><br><b>{{ c.down_mbps|speed }}</b></div>
     <div><small class="muted">Límite de subida</small><br><b>{{ c.up_mbps|speed }}</b></div>
@@ -78,6 +79,26 @@
     <button class="btn primary">Recargar</button>
   </form>
   <p class="small muted">Suma los GB del plan a lo que le queda, le pone la velocidad del plan y reactiva la configuración si estaba agotada. El cliente sigue usando el mismo archivo / QR.</p>
+</section>
+
+<section class="card">
+  <h2>Salida a internet</h2>
+  <form method="post" action="/clients/{{ c.id }}/exit" class="exit-pick">
+    <label class="plan pick">
+      <input type="radio" name="exit" value="server" {% if c.exit != "warp" %}checked{% endif %} onchange="this.form.submit()">
+      <b>Servidor</b><small>Sale con la IP del servidor ({{ server_ip }})</small>
+    </label>
+    <label class="plan pick {% if not warp %}dim{% endif %}">
+      <input type="radio" name="exit" value="warp" {% if c.exit == "warp" %}checked{% endif %} {% if not warp %}disabled{% endif %} onchange="this.form.submit()">
+      <b>☁ Cloudflare</b><small>Sale con una IP de Cloudflare (WARP)</small>
+    </label>
+  </form>
+  {% if not warp %}
+  <p class="small muted">Cloudflare WARP no está instalado. En la consola del servidor:
+    <span class="mono">cd ~/vpnxgb && bash warp.sh</span></p>
+  {% else %}
+  <p class="small muted">Tras cambiarlo, el cliente debe desconectar y volver a conectar la VPN. Puede comprobar su IP en ifconfig.me.</p>
+  {% endif %}
 </section>
 
 <section class="card">

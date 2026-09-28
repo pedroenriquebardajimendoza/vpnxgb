@@ -275,6 +275,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             sales=sales,
             expires=parse_time(client["expires_at"]),
             history=panel.history(client_id, days=30),
+            warp=panel.warp_available(),
+            server_ip=settings.server_endpoint.rsplit(":", 1)[0],
         )
 
     def _filename(client) -> str:
@@ -298,6 +300,12 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         buf = io.BytesIO()
         img.save(buf)
         return Response(buf.getvalue(), media_type="image/svg+xml")
+
+    @app.post("/clients/{client_id}/exit")
+    def client_exit(request: Request, client_id: int, exit: str = Form(...)):
+        label = "Cloudflare" if exit == "warp" else "el servidor"
+        return run(request, f"/clients/{client_id}", lambda: panel.set_exit(client_id, exit),
+                   f"Ahora sale a internet por {label}. El cliente debe desconectar y conectar la VPN.")
 
     @app.post("/clients/{client_id}/pause")
     def client_pause(request: Request, client_id: int):

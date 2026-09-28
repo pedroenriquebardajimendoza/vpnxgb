@@ -180,8 +180,10 @@ class WireGuard:
         self.ifb = ifb
         self.dry_run = dry_run
         self.commands: list[list[str]] = []
-        # En dry_run se simulan los peers y sus contadores.
+        # En dry_run se simulan los peers y sus contadores, y la salida WARP.
         self.fake_peers: dict[str, PeerStats] = {}
+        self.fake_warp = True
+        self.fake_exit_rules: set[str] = set()
 
     def _run(self, cmd: list[str], check: bool = True, stdin: str | None = None) -> str:
         self.commands.append(cmd)
@@ -221,6 +223,30 @@ class WireGuard:
             return dict(self.fake_peers)
         return parse_dump(self._run(["wg", "show", self.interface, "dump"]))
 
+    def warp_available(self, name: str) -> bool:
+        """True si existe la interfaz de Cloudflare WARP (instalada con warp.sh)."""
+        if self.dry_run:
+            return self.fake_warp
+        return subprocess.run(["ip", "link", "show", name], capture_output=True).returncode == 0
+
+    def exit_rules(self) -> set[str]:
+        if self.dry_run:
+            return set(self.fake_exit_rules)
+        return parse_exit_rules(self._run(["ip", "rule", "show"]))
+
+    def apply_exits(self, addresses: set[str]) -> None:
+        """Deja una regla `from IP lookup 51` exactamente para las IPs indicadas:
+        el tráfico de esos clientes sale por Cloudflare en lugar del servidor."""
+        current = self.exit_rules()
+        for ip in sorted(current - addresses):
+            self._run(["ip", "rule", "del", "from", f"{ip}/32", "lookup", WARP_TABLE,
+                       "priority", WARP_PRIORITY], check=False)
+        for ip in sorted(addresses - current):
+            self._run(["ip", "rule", "add", "from", f"{ip}/32", "lookup", WARP_TABLE,
+                       "priority", WARP_PRIORITY])
+        if self.dry_run:
+            self.fake_exit_rules = set(addresses)
+
     def apply_shaping(self, rules: list[Shaping]) -> None:
         for cmd in build_tc_commands(self.interface, self.ifb, rules):
             # Los "del" / "ip link add" fallan si no existe/ya existe: se ignora.
@@ -229,6 +255,23 @@ class WireGuard:
                 self._run(cmd, check=not tolerant)
             except RuntimeError as exc:
                 log.error("tc: %s", exc)
+
+
+# ---------------------------------------------------------------- salida por Cloudflare
+
+WARP_TABLE = "51"        # tabla de rutas cuya ruta por defecto es la interfaz warp
+WARP_PRIORITY = "5100"
+
+
+def parse_exit_rules(output: str) -> set[str]:
+    """IPs de clientes que tienen regla `from IP lookup 51` en `ip rule show`."""
+    found = set()
+    for line in output.splitlines():
+        parts = line.replace(":", " ").split()
+        if "from" in parts and "lookup" in parts:
+            if parts[parts.index("lookup") + 1] == WARP_TABLE:
+                found.add(parts[parts.index("from") + 1].split("/")[0])
+    return found
 
 
 def allocate_address(network: str, server_address: str, used: set[str]) -> str:

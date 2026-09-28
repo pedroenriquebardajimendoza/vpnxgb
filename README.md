@@ -33,6 +33,20 @@ Panel web para vender configuraciones de **WireGuard por paquetes de datos**
   servidor completo, y la lista de los que más consumen hoy.
 - Diseño pensado para usarlo **desde el móvil**.
 
+## Salida por Cloudflare (opcional)
+
+Cada cliente puede salir a internet con la IP del servidor (por defecto) o con
+una IP de Cloudflare WARP:
+
+```bash
+cd ~/vpnxgb && bash warp.sh     # una sola vez
+```
+
+Luego, en la ficha del cliente: **Salida a internet → Cloudflare**. La salida del
+servidor no cambia; sólo los clientes marcados pasan por Cloudflare. Las IPs de
+Cloudflare son compartidas (no son una IP única por cliente) y las condiciones de
+WARP gratuito son para uso personal.
+
 ## Instalación en el VPS
 
 Necesitas un VPS con **Ubuntu 22.04/24.04 o Debian 11/12**, fuera de Cuba y con IP pública.

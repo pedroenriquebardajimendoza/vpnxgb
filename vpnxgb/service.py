@@ -77,6 +77,26 @@ class Panel:
             [Shaping(r["id"], r["address"], r["down_mbps"], r["up_mbps"]) for r in rows]
         )
 
+    def _apply_exits(self, conn) -> None:
+        addresses = {r["address"] for r in conn.execute(
+            "SELECT address FROM clients WHERE exit = 'warp'")}
+        if addresses and not self.warp_available():
+            log.error("Hay clientes con salida por Cloudflare pero WARP no está instalado")
+        self.wg.apply_exits(addresses if self.warp_available() else set())
+
+    def warp_available(self) -> bool:
+        return self.wg.warp_available(self.settings.warp_interface)
+
+    def set_exit(self, client_id: int, exit: str) -> None:
+        if exit not in ("server", "warp"):
+            raise PanelError("Salida no válida")
+        if exit == "warp" and not self.warp_available():
+            raise PanelError("Cloudflare WARP no está instalado en el servidor (ejecuta warp.sh)")
+        with self.lock, self.db.connect() as conn:
+            self._client(conn, client_id)
+            conn.execute("UPDATE clients SET exit = ? WHERE id = ?", (exit, client_id))
+            self._apply_exits(conn)
+
     def _disconnect(self, conn, client) -> None:
         """Quita el peer de la interfaz. Sus contadores en WireGuard se pierden,
         por eso se reinician también los de referencia."""
@@ -125,6 +145,7 @@ class Panel:
                 if pk not in current:
                     self._connect(conn, client)
             self._reshape(conn)
+            self._apply_exits(conn)
 
     # ------------------------------------------------------------ consumo
 
@@ -362,6 +383,7 @@ class Panel:
             conn.execute("UPDATE sales SET client_id = NULL WHERE client_id = ?", (client_id,))
             conn.execute("DELETE FROM clients WHERE id = ?", (client_id,))
             self._reshape(conn)
+            self._apply_exits(conn)
 
     def client_config(self, client) -> str:
         s = self.settings
@@ -446,6 +468,7 @@ class Panel:
                 "quota_bytes": c["quota_bytes"],
                 "down_mbps": c["down_mbps"],
                 "up_mbps": c["up_mbps"],
+                "exit": c["exit"],
             })
         return result
 

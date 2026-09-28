@@ -347,3 +347,51 @@ def test_page_titles_are_clean(app, panel):
             html = web.get(page).text
             title = html[html.index("<title>"):html.index("</title>")]
             assert "<script" not in title, page
+
+
+def test_parse_exit_rules():
+    from vpnxgb.wg import parse_exit_rules
+
+    out = ("0:\tfrom all lookup local\n"
+           "5099:\tfrom 172.16.0.2 lookup 51\n"
+           "5100:\tfrom 10.8.0.5 lookup 51\n"
+           "5100:\tfrom 10.8.0.9/32 lookup 51\n"
+           "32766:\tfrom all lookup main\n")
+    assert parse_exit_rules(out) == {"172.16.0.2", "10.8.0.5", "10.8.0.9"}
+
+
+def test_client_exit_through_cloudflare(panel):
+    a = panel.create_client("A", plan_id(panel, "3 GB"))
+    b = panel.create_client("B", plan_id(panel, "3 GB"))
+    addr_a = panel.get_client(a)["address"]
+    panel.wg.commands.clear()
+    panel.set_exit(a, "warp")
+    assert panel.get_client(a)["exit"] == "warp"
+    assert panel.wg.fake_exit_rules == {addr_a}
+    assert ["ip", "rule", "add", "from", f"{addr_a}/32", "lookup", "51",
+            "priority", "5100"] in panel.wg.commands
+    assert panel.live(a)[0]["exit"] == "warp" and panel.live(b)[0]["exit"] == "server"
+
+    panel.set_exit(a, "server")
+    assert panel.wg.fake_exit_rules == set()
+
+    panel.set_exit(b, "warp")
+    panel.delete_client(b)
+    assert panel.wg.fake_exit_rules == set()
+
+    panel.wg.fake_warp = False
+    with pytest.raises(service.PanelError):
+        panel.set_exit(a, "warp")
+    with pytest.raises(service.PanelError):
+        panel.set_exit(a, "otra")
+
+
+def test_client_exit_web(app, panel):
+    cid = panel.create_client("Web", plan_id(panel, "3 GB"))
+    with TestClient(app) as web:
+        web.post("/login", data={"username": "admin", "password": "secreto"})
+        assert "Salida a internet" in web.get(f"/clients/{cid}").text
+        r = web.post(f"/clients/{cid}/exit", data={"exit": "warp"})
+        assert "Cloudflare" in r.text
+        assert panel.get_client(cid)["exit"] == "warp"
+        assert "Cloudflare" in web.get("/clients").text
