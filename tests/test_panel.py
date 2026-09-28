@@ -273,3 +273,16 @@ def test_live_rates_when_counters_mutate_in_place(panel, monkeypatch):
     clock[0] += 1
     peer.tx += 4000
     assert panel.live(cid)[0]["down_rate"] == 4000
+
+
+def test_trial_speed_limit_is_lifted_by_paid_recharge(panel):
+    trial = plan_id(panel, "Prueba gratis")
+    panel.save_plan(trial, "Prueba gratis", 1, 0, 0, 1, 1, True)
+    cid = panel.create_client("Nuevo", trial)
+    c = panel.get_client(cid)
+    assert (c["down_mbps"], c["up_mbps"]) == (1, 1)
+    flat = [" ".join(x) for x in panel.wg.commands]
+    assert any("rate 1000kbit" in x for x in flat)
+    panel.recharge(cid, plan_id(panel, "3 GB"))
+    c = panel.get_client(cid)
+    assert (c["down_mbps"], c["up_mbps"]) == (0, 0)

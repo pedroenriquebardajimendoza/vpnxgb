@@ -253,7 +253,9 @@ class Panel:
             return client_id
 
     def recharge(self, client_id: int, plan_id: int) -> None:
-        """Vende un paquete a un cliente existente: suma GB (y días si el plan caduca)."""
+        """Vende un paquete a un cliente existente: suma GB (y días si el plan caduca).
+        La velocidad pasa a ser la del plan comprado (p. ej. deja de estar limitado
+        como en la prueba gratis al comprar un paquete de pago)."""
         with self.lock, self.db.connect() as conn:
             client = self._client(conn, client_id)
             plan = self._plan(conn, plan_id)
@@ -268,8 +270,9 @@ class Panel:
             else:
                 expires = None
             conn.execute(
-                "UPDATE clients SET quota_bytes = ?, expires_at = ? WHERE id = ?",
-                (quota, expires, client_id),
+                "UPDATE clients SET quota_bytes = ?, expires_at = ?, down_mbps = ?, up_mbps = ? "
+                "WHERE id = ?",
+                (quota, expires, plan["down_mbps"], plan["up_mbps"], client_id),
             )
             self._record_sale(conn, client_id, client["name"], plan, "recarga")
             client = self._client(conn, client_id)
