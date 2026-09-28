@@ -117,12 +117,11 @@
     const m = { l: 56, r: 8, t: 10, b: 22 };
     host.querySelector("svg")?.remove();
     const svg = el("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img",
-      "aria-label": "Consumo por día: bajada, subida y Outline" });
+      "aria-label": "Consumo por día: bajada y subida" });
     host.prepend(svg);
     const iw = W - m.l - m.r, ih = H - m.t - m.b;
     const GBy = 1024 ** 3;
-    const total = d => d.down + d.up + (d.ol || 0);
-    const max = niceMax(Math.max(0.001, ...days.map(d => total(d) / GBy)) * 1.05);
+    const max = niceMax(Math.max(0.001, ...days.map(d => (d.down + d.up) / GBy)) * 1.05);
     const Y = v => m.t + ih - (ih * v) / max;
     const nt = ticksFor(max);
     for (let k = 0; k <= nt; k++) {
@@ -134,27 +133,20 @@
     const slot = iw / days.length;
     const bw = Math.max(2, Math.min(24, slot - 3));
     const tip = tooltip(host);
-    const hasOutline = days.some(d => d.ol > 0);
     days.forEach((d, i) => {
       const x = m.l + slot * i + (slot - bw) / 2;
-      // Segmentos de abajo hacia arriba, con 2px de separación entre ellos.
-      const segs = [[d.down, "viz-s1f"], [d.up, "viz-s2f"], [d.ol || 0, "viz-s3f"]].filter(s => s[0] > 0);
-      let base = 0;
+      const down = d.down / GBy, up = d.up / GBy;
+      const yDown = Y(down), yTop = Y(down + up);
       const g = el("g", {}, svg);
-      segs.forEach(([bytes, cls], k) => {
-        const yBottom = Y(base / GBy), yTop = Y((base + bytes) / GBy);
-        const h = Math.max(0, yBottom - yTop - (k > 0 ? 2 : 0));
-        el("path", { d: roundedTop(x, yTop, bw, h, k === segs.length - 1 ? 3 : 0), class: cls }, g);
-        base += bytes;
-      });
-      const yTop = Y(total(d) / GBy);
+      if (down > 0) el("path", { d: roundedTop(x, yDown, bw, Y(0) - yDown, up > 0 ? 0 : 3), class: "viz-s1f" }, g);
+      // 2px de separación entre segmentos apilados
+      if (up > 0) el("path", { d: roundedTop(x, yTop, bw, Math.max(0, yDown - yTop - (down > 0 ? 2 : 0)), 3), class: "viz-s2f" }, g);
       const hit = el("rect", { x: m.l + slot * i, y: m.t, width: slot, height: ih, fill: "transparent" }, svg);
       hit.addEventListener("pointermove", () => {
         const [yy, mm, dd] = d.day.split("-");
         tip.innerHTML = `<b>${dd}/${mm}/${yy}</b><div><i class="sw s1"></i>Bajada <b>${fmtBytes(d.down)}</b></div>` +
                         `<div><i class="sw s2"></i>Subida <b>${fmtBytes(d.up)}</b></div>` +
-                        (hasOutline ? `<div><i class="sw s3"></i>Outline <b>${fmtBytes(d.ol || 0)}</b></div>` : "") +
-                        `<div class="muted">Total ${fmtBytes(total(d))}</div>`;
+                        `<div class="muted">Total ${fmtBytes(d.down + d.up)}</div>`;
         tip.style.display = "block";
         placeTip(tip, host, x + bw / 2, yTop);
       });

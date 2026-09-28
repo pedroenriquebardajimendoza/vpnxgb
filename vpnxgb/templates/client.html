@@ -51,16 +51,16 @@
 
 <section class="card">
   <h2>Consumo por día (30 días)</h2>
-  <div class="legend"><span><i class="sw s1"></i>Bajada</span><span><i class="sw s2"></i>Subida</span>{% if outline_on %}<span><i class="sw s3"></i>Outline</span>{% endif %}</div>
+  <div class="legend"><span><i class="sw s1"></i>Bajada</span><span><i class="sw s2"></i>Subida</span></div>
   <div class="viz" id="d-chart"></div>
   <details class="table-view"><summary>Ver como tabla</summary>
     <div class="table"><table>
-      <thead><tr><th>Día</th><th class="num">Bajada</th><th class="num">Subida</th><th class="num">Outline</th><th class="num">Total</th></tr></thead>
+      <thead><tr><th>Día</th><th class="num">Bajada</th><th class="num">Subida</th><th class="num">Total</th></tr></thead>
       <tbody>
-      {% for d in history|reverse if d.down or d.up or d.ol %}
-      <tr><td>{{ d.day[8:10] }}/{{ d.day[5:7] }}</td><td class="num">{{ d.down|bytes }}</td><td class="num">{{ d.up|bytes }}</td><td class="num">{{ d.ol|bytes }}</td><td class="num">{{ (d.down + d.up + d.ol)|bytes }}</td></tr>
+      {% for d in history|reverse if d.down or d.up %}
+      <tr><td>{{ d.day[8:10] }}/{{ d.day[5:7] }}</td><td class="num">{{ d.down|bytes }}</td><td class="num">{{ d.up|bytes }}</td><td class="num">{{ (d.down + d.up)|bytes }}</td></tr>
       {% else %}
-      <tr><td colspan="5" class="muted">Sin consumo todavía.</td></tr>
+      <tr><td colspan="4" class="muted">Sin consumo todavía.</td></tr>
       {% endfor %}
       </tbody>
     </table></div>
@@ -92,34 +92,9 @@
 
 <section class="card">
   <h2>Configuración para el cliente</h2>
-  {% if outline_on %}
-  <div class="tabs">
-    <button type="button" class="btn on" data-tab="t-wg">WireGuard</button>
-    <button type="button" class="btn" data-tab="t-ol">Outline</button>
-  </div>
-  {% endif %}
-  <div id="t-wg">
-    <div class="qr"><img src="/clients/{{ c.id }}/qr.svg" alt="QR de WireGuard"></div>
-    <p class="small muted center">Escanéalo desde la app WireGuard: “+” → “Escanear código QR”.</p>
-    <textarea readonly rows="11" onclick="this.select()">{{ config }}</textarea>
-  </div>
-  {% if outline_on %}
-  <div id="t-ol" hidden>
-    {% if c.outline_url %}
-    <div class="qr"><img src="/clients/{{ c.id }}/outline-qr.svg" alt="QR de Outline"></div>
-    <p class="small muted center">En la app Outline: “+” y pega la clave (o escanea el QR).</p>
-    <div class="key-box">
-      <input id="ol-key" readonly value="{{ c.outline_url }}" onclick="this.select()">
-      <button type="button" class="btn" id="ol-copy">Copiar</button>
-    </div>
-    <p class="small muted">Consumido por Outline: <b>{{ c.outline_bytes|bytes }}</b> (cuenta para el mismo paquete).
-      Outline no limita la velocidad.</p>
-    {% else %}
-    <p class="muted">Este cliente todavía no tiene clave de Outline.</p>
-    <form method="post" action="/clients/{{ c.id }}/outline"><button class="btn primary">Crear clave Outline</button></form>
-    {% endif %}
-  </div>
-  {% endif %}
+  <div class="qr"><img src="/clients/{{ c.id }}/qr.svg" alt="QR de WireGuard"></div>
+  <p class="small muted center">Escanéalo desde la app WireGuard: “+” → “Escanear código QR”.</p>
+  <textarea readonly rows="11" onclick="this.select()">{{ config }}</textarea>
 </section>
 
 <section class="card">
@@ -150,16 +125,6 @@
 (function () {
   const { liveChart, dailyChart, fmtBytes, fmtRate } = window.VizCharts;
   const $ = id => document.getElementById(id);
-  document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", () => {
-    document.querySelectorAll(".tabs button").forEach(x => {
-      x.classList.toggle("on", x === b);
-      $(x.dataset.tab).hidden = x !== b;
-    });
-  }));
-  $("ol-copy")?.addEventListener("click", async () => {
-    try { await navigator.clipboard.writeText($("ol-key").value); $("ol-copy").textContent = "¡Copiada!"; }
-    catch (e) { $("ol-key").select(); }
-  });
   const daily = {{ history|tojson }};
   const points = [];
   dailyChart($("d-chart"), daily);

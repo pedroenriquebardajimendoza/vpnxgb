@@ -11,7 +11,6 @@
   --grey: #8a93a3;
   --series-1: #2a78d6;   /* bajada */
   --series-2: #eb6834;   /* subida */
-  --series-3: #1baf7a;   /* outline */
   --grid: #e1e0d9;
   --axis: #c3c2b7;
   --axis-text: #898781;
@@ -26,7 +25,6 @@
     --primary: #5b8dff;
     --series-1: #3987e5;
     --series-2: #d95926;
-    --series-3: #199e70;
     --grid: #2c2c2a;
     --axis: #383835;
   }
@@ -155,7 +153,6 @@ tr:last-child td { border-bottom: 0; }
 .viz-line.viz-s2 { stroke: var(--series-2); }
 .viz-s1f { fill: var(--series-1); }
 .viz-s2f { fill: var(--series-2); }
-.viz-s3f { fill: var(--series-3); }
 .viz-dot { stroke: var(--card); stroke-width: 2; }
 .viz-cross { stroke: var(--axis-text); stroke-width: 1; stroke-dasharray: 3 3; }
 .viz-tip {
@@ -168,12 +165,6 @@ tr:last-child td { border-bottom: 0; }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
 .sw.s1 { background: var(--series-1); }
 .sw.s2 { background: var(--series-2); }
-.sw.s3 { background: var(--series-3); }
-.key-box { display: flex; gap: 8px; align-items: stretch; }
-.key-box input { flex: 1; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .8rem; }
-.tabs { display: flex; gap: 6px; margin-bottom: 12px; }
-.tabs button { flex: 1; }
-.tabs button.on { background: var(--primary); border-color: var(--primary); color: #fff; }
 details.table-view summary { cursor: pointer; color: var(--primary); font-size: .85rem; margin-top: 8px; }
 
 /* ---------------------------------------------------------------- monitor */
@@ -197,4 +188,3 @@ details.table-view summary { cursor: pointer; color: var(--primary); font-size: 
 .live-badge::before { content: "●"; margin-right: 4px; animation: blink 1.5s infinite; }
 @keyframes blink { 50% { opacity: .3; } }
 .free { color: var(--ok); font-weight: 700; }
-.btn:disabled { opacity: .45; cursor: default; }
