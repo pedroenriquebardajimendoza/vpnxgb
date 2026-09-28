@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}Monitor{% endblock %}
+{% block content %}
+<div class="row between">
+  <h1>Monitor <span class="live-badge" id="clock">en vivo</span></h1>
+</div>
+
+<section class="tiles" id="server">
+  <div class="tile"><small>Bajada total ahora</small><b class="rate" id="t-down">—</b></div>
+  <div class="tile"><small>Subida total ahora</small><b class="rate" id="t-up">—</b></div>
+  <div class="tile"><small>En línea</small><b id="t-online">—</b></div>
+  <div class="tile"><small>Tráfico del mes</small><b id="t-month">—</b>
+    <div class="bar"><i id="t-month-bar" style="width:0"></i></div><span id="t-month-of"></span></div>
+  <div class="tile"><small>CPU</small><b id="t-cpu">—</b>
+    <div class="bar"><i id="t-cpu-bar" style="width:0"></i></div><span id="t-cpu-of"></span></div>
+  <div class="tile"><small>RAM</small><b id="t-ram">—</b>
+    <div class="bar"><i id="t-ram-bar" style="width:0"></i></div><span id="t-ram-of"></span></div>
+  <div class="tile"><small>Disco</small><b id="t-disk">—</b>
+    <div class="bar"><i id="t-disk-bar" style="width:0"></i></div><span id="t-disk-of"></span></div>
+  <div class="tile"><small>Servidor encendido</small><b id="t-uptime">—</b></div>
+</section>
+
+<section class="card">
+  <h2>Tráfico del servidor (últimos 2 minutos)</h2>
+  <div class="legend"><span><i class="sw s1"></i>Bajada</span><span><i class="sw s2"></i>Subida</span></div>
+  <div class="viz" id="live-chart"></div>
+</section>
+
+<div class="toolbar">
+  <input class="grow" id="q" placeholder="Buscar cliente, IP…">
+  <select id="sort">
+    <option value="rate">Ordenar: velocidad ahora</option>
+    <option value="total">Ordenar: consumo total</option>
+    <option value="left">Ordenar: le queda menos</option>
+    <option value="name">Ordenar: nombre</option>
+  </select>
+  <label class="check"><input type="checkbox" id="only-online"> Solo en línea</label>
+</div>
+
+<div class="table">
+<table class="monitor-table">
+  <thead><tr>
+    <th>Cliente</th><th class="num">↓ Ahora</th><th class="num">↑ Ahora</th>
+    <th class="num">Consumo</th><th class="num">↓ Total</th><th class="num">↑ Total</th>
+    <th>IP VPN</th><th>IP real</th><th>Límite</th><th>Última conexión</th>
+  </tr></thead>
+  <tbody id="rows"><tr><td colspan="10" class="muted">Cargando…</td></tr></tbody>
+</table>
+</div>
+<p class="small muted">Se actualiza cada 2 segundos. "IP real" es la dirección desde donde se conecta el cliente (su línea de ETECSA, wifi, etc.).</p>
+
+<script src="/static/charts.js"></script>
+<script>
+(function () {
+  const { liveChart, fmtBytes, fmtRate } = window.VizCharts;
+  const STATUS = {{ STATUS_LABELS|tojson }};
+  const $ = id => document.getElementById(id);
+  const history = [];
+  let last = null;
+
+  function ago(ts) {
+    if (!ts) return "Nunca";
+    const s = Math.floor(Date.now() / 1000) - ts;
+    if (s < 180) return "En línea";
+    if (s < 3600) return "hace " + Math.floor(s / 60) + " min";
+    if (s < 86400) return "hace " + Math.floor(s / 3600) + " h";
+    return "hace " + Math.floor(s / 86400) + " días";
+  }
+  function uptime(s) {
+    const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+    return (d ? d + "d " : "") + h + "h " + m + "m";
+  }
+  function speed(mbps) { return mbps ? mbps + " Mbps" : "∞"; }
+  function setBar(id, pct) {
+    const b = $(id); b.style.width = Math.min(100, pct).toFixed(1) + "%";
+    b.className = pct >= 90 ? "hot" : "";
+  }
+  function td(text, cls) {
+    const c = document.createElement("td");
+    if (cls) c.className = cls;
+    c.textContent = text;
+    return c;
+  }
+
+  function renderRows() {
+    if (!last) return;
+    const q = $("q").value.trim().toLowerCase();
+    const onlyOnline = $("only-online").checked;
+    let list = last.clients.filter(c =>
+      (!onlyOnline || c.online) &&
+      (!q || (c.name + " " + c.address + " " + c.endpoint).toLowerCase().includes(q)));
+    const sort = $("sort").value;
+    const key = {
+      rate: c => -(c.down_rate + c.up_rate) - (c.online ? 1e-3 : 0),
+      total: c => -c.used_bytes,
+      left: c => c.quota_bytes - c.used_bytes,
+      name: c => c.name.toLowerCase(),
+    }[sort];
+    list.sort((a, b) => { const x = key(a), y = key(b); return x < y ? -1 : x > y ? 1 : 0; });
+
+    const body = $("rows");
+    body.textContent = "";
+    if (!list.length) {
+      const tr = body.insertRow(); const c = td("No hay clientes que mostrar.", "muted"); c.colSpan = 10; tr.appendChild(c);
+      return;
+    }
+    for (const c of list) {
+      const tr = document.createElement("tr");
+      tr.onclick = () => { location.href = "/clients/" + c.id; };
+      const name = document.createElement("td");
+      const dot = document.createElement("span"); dot.className = "dot-online" + (c.online ? " on" : "");
+      name.appendChild(dot);
+      const b = document.createElement("b"); b.textContent = c.name; name.appendChild(b);
+      if (c.status !== "activo") {
+        const chip = document.createElement("span"); chip.className = "chip " + c.status;
+        chip.style.marginLeft = "6px"; chip.textContent = STATUS[c.status]; name.appendChild(chip);
+      }
+      tr.appendChild(name);
+      tr.appendChild(td(fmtRate(c.down_rate), "num rate"));
+      tr.appendChild(td(fmtRate(c.up_rate), "num rate"));
+      const pct = c.quota_bytes ? 100 * c.used_bytes / c.quota_bytes : 100;
+      tr.appendChild(td(fmtBytes(c.used_bytes) + " / " + fmtBytes(c.quota_bytes) + " (" + Math.min(pct, 100).toFixed(0) + "%)", "num"));
+      tr.appendChild(td(fmtBytes(c.down_bytes), "num"));
+      tr.appendChild(td(fmtBytes(c.up_bytes), "num"));
+      tr.appendChild(td(c.address, "mono"));
+      tr.appendChild(td(c.endpoint ? c.endpoint.replace(/:\d+$/, "") : "—", "mono"));
+      tr.appendChild(td("↓" + speed(c.down_mbps) + " ↑" + speed(c.up_mbps)));
+      tr.appendChild(td(ago(c.last_handshake)));
+      body.appendChild(tr);
+    }
+  }
+
+  async function tick() {
+    try {
+      const r = await fetch("/api/live", { cache: "no-store" });
+      if (r.status === 401) { location.href = "/login"; return; }
+      last = await r.json();
+    } catch (e) { $("clock").textContent = "sin conexión"; return; }
+    const t = last.totals, s = last.server;
+    $("clock").textContent = "en vivo · " + last.time;
+    $("t-down").textContent = fmtRate(t.down_rate);
+    $("t-up").textContent = fmtRate(t.up_rate);
+    $("t-online").textContent = t.online + " de " + t.total;
+    const gb = n => (n / 1024 ** 3).toFixed(n >= 100 * 1024 ** 3 ? 0 : 1) + " GB";
+    $("t-month").textContent = fmtBytes(last.month_traffic);
+    $("t-month-of").textContent = "de " + gb(last.month_limit);
+    setBar("t-month-bar", 100 * last.month_traffic / last.month_limit);
+    $("t-cpu").textContent = s.cpu_pct + "%";
+    $("t-cpu-of").textContent = s.cpus + " núcleo" + (s.cpus > 1 ? "s" : "") + " · carga " + s.load1.toFixed(2);
+    setBar("t-cpu-bar", s.cpu_pct);
+    $("t-ram").textContent = fmtBytes(s.mem_used);
+    $("t-ram-of").textContent = "de " + fmtBytes(s.mem_total);
+    setBar("t-ram-bar", 100 * s.mem_used / s.mem_total);
+    $("t-disk").textContent = fmtBytes(s.disk_used);
+    $("t-disk-of").textContent = "de " + gb(s.disk_total);
+    setBar("t-disk-bar", 100 * s.disk_used / s.disk_total);
+    $("t-uptime").textContent = uptime(s.uptime);
+
+    history.push({ t: last.time, down: t.down_rate, up: t.up_rate });
+    if (history.length > 60) history.shift();
+    liveChart($("live-chart"), history);
+    renderRows();
+  }
+
+  ["q", "sort", "only-online"].forEach(id => $(id).addEventListener("input", renderRows));
+  tick();
+  setInterval(tick, 2000);
+})();
+</script>
+{% endblock %}

@@ -1,5 +1,52 @@
 {% extends "base.html" %}
-{% block title %}{{ c.name }}{% endblock %}
+{% block title %}{{ c.name }}<script src="/static/charts.js"></script>
+<script>
+(function () {
+  const { liveChart, dailyChart, fmtBytes, fmtRate } = window.VizCharts;
+  const $ = id => document.getElementById(id);
+  const daily = {{ history|tojson }};
+  const points = [];
+  dailyChart($("d-chart"), daily);
+  window.addEventListener("resize", () => { dailyChart($("d-chart"), daily); liveChart($("l-chart"), points); });
+
+  function ago(ts) {
+    if (!ts) return "Nunca";
+    const s = Math.floor(Date.now() / 1000) - ts;
+    if (s < 180) return "En línea";
+    if (s < 3600) return "hace " + Math.floor(s / 60) + " min";
+    if (s < 86400) return "hace " + Math.floor(s / 3600) + " h";
+    return "hace " + Math.floor(s / 86400) + " días";
+  }
+  async function tick() {
+    let data;
+    try {
+      const r = await fetch("/api/live?client={{ c.id }}", { cache: "no-store" });
+      if (r.status === 401) { location.href = "/login"; return; }
+      data = await r.json();
+    } catch (e) { $("l-clock").textContent = "sin conexión"; return; }
+    const c = data.clients[0];
+    if (!c) return;
+    $("l-clock").textContent = "en vivo · " + data.time;
+    $("l-down-rate").textContent = fmtRate(c.down_rate);
+    $("l-up-rate").textContent = fmtRate(c.up_rate);
+    $("l-down").textContent = fmtBytes(c.down_bytes);
+    $("l-up").textContent = fmtBytes(c.up_bytes);
+    $("l-used").textContent = fmtBytes(c.used_bytes) + " de " + fmtBytes(c.quota_bytes);
+    $("l-left").textContent = fmtBytes(Math.max(0, c.quota_bytes - c.used_bytes));
+    $("l-seen").textContent = ago(c.last_handshake);
+    if (c.endpoint) $("l-endpoint").textContent = c.endpoint.replace(/:\d+$/, "");
+    const pct = c.quota_bytes ? 100 * c.used_bytes / c.quota_bytes : 100;
+    $("l-bar").style.width = Math.min(100, pct).toFixed(1) + "%";
+    $("l-bar").className = pct >= 90 ? "hot" : "";
+    points.push({ t: data.time, down: c.down_rate, up: c.up_rate });
+    if (points.length > 60) points.shift();
+    liveChart($("l-chart"), points);
+  }
+  tick();
+  setInterval(tick, 2000);
+})();
+</script>
+{% endblock %}
 {% block content %}
 {% set pct = (100 * c.used_bytes / c.quota_bytes) if c.quota_bytes else 100 %}
 {% set left = c.quota_bytes - c.used_bytes %}
@@ -11,15 +58,18 @@
 {% if c.note %}<p class="muted">{{ c.note }}</p>{% endif %}
 
 <section class="card">
-  <div class="row between"><b>Consumo</b><span>{{ c.used_bytes|bytes }} de {{ c.quota_bytes|bytes }}</span></div>
-  <div class="bar big"><i style="width: {{ [pct, 100]|min|round(1) }}%" class="{% if pct >= 90 %}hot{% endif %}"></i></div>
+  <div class="row between"><b>Consumo</b><span id="l-used">{{ c.used_bytes|bytes }} de {{ c.quota_bytes|bytes }}</span></div>
+  <div class="bar big"><i id="l-bar" style="width: {{ [pct, 100]|min|round(1) }}%" class="{% if pct >= 90 %}hot{% endif %}"></i></div>
   <div class="grid2 small">
-    <div><small class="muted">Le quedan</small><br><b>{{ (left if left > 0 else 0)|bytes }}</b></div>
-    <div><small class="muted">Última conexión</small><br><b>{{ c.last_handshake|ago }}</b></div>
+    <div><small class="muted">Le quedan</small><br><b id="l-left">{{ (left if left > 0 else 0)|bytes }}</b></div>
+    <div><small class="muted">Última conexión</small><br><b id="l-seen">{{ c.last_handshake|ago }}</b></div>
+    <div><small class="muted"><i class="sw s1"></i>Bajada total</small><br><b id="l-down">{{ c.down_bytes|bytes }}</b></div>
+    <div><small class="muted"><i class="sw s2"></i>Subida total</small><br><b id="l-up">{{ c.up_bytes|bytes }}</b></div>
+    <div><small class="muted">IP real (desde donde se conecta)</small><br><b id="l-endpoint" class="mono">{{ c.endpoint.rsplit(":", 1)[0] if c.endpoint else "—" }}</b></div>
     <div><small class="muted">Vence</small><br><b>{{ expires.strftime("%d/%m/%Y %H:%M") if expires else "No vence" }}</b></div>
     <div><small class="muted">IP interna</small><br><b>{{ c.address }}</b></div>
-    <div><small class="muted">Bajada</small><br><b>{{ c.down_mbps|speed }}</b></div>
-    <div><small class="muted">Subida</small><br><b>{{ c.up_mbps|speed }}</b></div>
+    <div><small class="muted">Límite de bajada</small><br><b>{{ c.down_mbps|speed }}</b></div>
+    <div><small class="muted">Límite de subida</small><br><b>{{ c.up_mbps|speed }}</b></div>
   </div>
   <div class="actions">
     {% if c.status == "activo" %}
@@ -35,11 +85,40 @@
 </section>
 
 <section class="card">
+  <div class="row between"><h2>Velocidad en vivo</h2><span class="live-badge" id="l-clock">en vivo</span></div>
+  <div class="tiles">
+    <div class="tile"><small><i class="sw s1"></i>Bajando ahora</small><b class="rate" id="l-down-rate">—</b></div>
+    <div class="tile"><small><i class="sw s2"></i>Subiendo ahora</small><b class="rate" id="l-up-rate">—</b></div>
+  </div>
+  <div class="legend"><span><i class="sw s1"></i>Bajada</span><span><i class="sw s2"></i>Subida</span></div>
+  <div class="viz" id="l-chart"></div>
+  <p class="small muted">Últimos 2 minutos, se actualiza cada 2 segundos mientras tengas esta página abierta.</p>
+</section>
+
+<section class="card">
+  <h2>Consumo por día (30 días)</h2>
+  <div class="legend"><span><i class="sw s1"></i>Bajada</span><span><i class="sw s2"></i>Subida</span></div>
+  <div class="viz" id="d-chart"></div>
+  <details class="table-view"><summary>Ver como tabla</summary>
+    <div class="table"><table>
+      <thead><tr><th>Día</th><th class="num">Bajada</th><th class="num">Subida</th><th class="num">Total</th></tr></thead>
+      <tbody>
+      {% for d in history|reverse if d.down or d.up %}
+      <tr><td>{{ d.day[8:10] }}/{{ d.day[5:7] }}</td><td class="num">{{ d.down|bytes }}</td><td class="num">{{ d.up|bytes }}</td><td class="num">{{ (d.down + d.up)|bytes }}</td></tr>
+      {% else %}
+      <tr><td colspan="4" class="muted">Sin consumo todavía.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </details>
+</section>
+
+<section class="card">
   <h2>Recargar (venta)</h2>
   <form method="post" action="/clients/{{ c.id }}/recharge" class="row wrap">
     <select name="plan_id" required>
       {% for p in plans %}
-      <option value="{{ p.id }}">{{ p.name }} — {{ p.price_cup|cup }} CUP{% if p.days %} · {{ p.days }} días{% endif %}</option>
+      <option value="{{ p.id }}">{{ p.name }} — {{ (p.price_cup|cup ~ " CUP") if p.price_cup else "GRATIS" }}{% if p.days %} · {{ p.days }} días{% endif %}</option>
       {% endfor %}
     </select>
     <button class="btn primary">Recargar</button>
@@ -87,4 +166,51 @@
 
 <h2>Historial de compras</h2>
 {% include "_sales_table.html" with context %}
+<script src="/static/charts.js"></script>
+<script>
+(function () {
+  const { liveChart, dailyChart, fmtBytes, fmtRate } = window.VizCharts;
+  const $ = id => document.getElementById(id);
+  const daily = {{ history|tojson }};
+  const points = [];
+  dailyChart($("d-chart"), daily);
+  window.addEventListener("resize", () => { dailyChart($("d-chart"), daily); liveChart($("l-chart"), points); });
+
+  function ago(ts) {
+    if (!ts) return "Nunca";
+    const s = Math.floor(Date.now() / 1000) - ts;
+    if (s < 180) return "En línea";
+    if (s < 3600) return "hace " + Math.floor(s / 60) + " min";
+    if (s < 86400) return "hace " + Math.floor(s / 3600) + " h";
+    return "hace " + Math.floor(s / 86400) + " días";
+  }
+  async function tick() {
+    let data;
+    try {
+      const r = await fetch("/api/live?client={{ c.id }}", { cache: "no-store" });
+      if (r.status === 401) { location.href = "/login"; return; }
+      data = await r.json();
+    } catch (e) { $("l-clock").textContent = "sin conexión"; return; }
+    const c = data.clients[0];
+    if (!c) return;
+    $("l-clock").textContent = "en vivo · " + data.time;
+    $("l-down-rate").textContent = fmtRate(c.down_rate);
+    $("l-up-rate").textContent = fmtRate(c.up_rate);
+    $("l-down").textContent = fmtBytes(c.down_bytes);
+    $("l-up").textContent = fmtBytes(c.up_bytes);
+    $("l-used").textContent = fmtBytes(c.used_bytes) + " de " + fmtBytes(c.quota_bytes);
+    $("l-left").textContent = fmtBytes(Math.max(0, c.quota_bytes - c.used_bytes));
+    $("l-seen").textContent = ago(c.last_handshake);
+    if (c.endpoint) $("l-endpoint").textContent = c.endpoint.replace(/:\d+$/, "");
+    const pct = c.quota_bytes ? 100 * c.used_bytes / c.quota_bytes : 100;
+    $("l-bar").style.width = Math.min(100, pct).toFixed(1) + "%";
+    $("l-bar").className = pct >= 90 ? "hot" : "";
+    points.push({ t: data.time, down: c.down_rate, up: c.up_rate });
+    if (points.length > 60) points.shift();
+    liveChart($("l-chart"), points);
+  }
+  tick();
+  setInterval(tick, 2000);
+})();
+</script>
 {% endblock %}

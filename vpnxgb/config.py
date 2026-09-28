@@ -29,6 +29,7 @@ class Settings:
     dry_run: bool            # True = no ejecuta wg/tc (para desarrollo y tests)
     poll_seconds: int
     ifb_interface: str
+    monthly_traffic_gb: float  # tráfico incluido en el VPS (para el aviso del mes)
 
 
 def load_settings() -> Settings:
@@ -49,4 +50,5 @@ def load_settings() -> Settings:
         dry_run=_bool(env("VPNXGB_DRY_RUN", "0")),
         poll_seconds=int(env("VPNXGB_POLL_SECONDS", "60")),
         ifb_interface=env("VPNXGB_IFB_INTERFACE", "ifb0"),
+        monthly_traffic_gb=float(env("VPNXGB_MONTHLY_TRAFFIC_GB", "1000")),
     )

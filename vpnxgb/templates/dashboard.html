@@ -1,5 +1,14 @@
 {% extends "base.html" %}
-{% block title %}Inicio{% endblock %}
+{% block title %}Inicio<script src="/static/charts.js"></script>
+<script>
+(function () {
+  const days = {{ history|tojson }};
+  const host = document.getElementById("d-chart");
+  window.VizCharts.dailyChart(host, days);
+  window.addEventListener("resize", () => window.VizCharts.dailyChart(host, days));
+})();
+</script>
+{% endblock %}
 {% block content %}
 <div class="row between">
   <h1>Inicio</h1>
@@ -14,8 +23,9 @@
     <span>{{ summary.month.n }} ventas · {{ "%g"|format(summary.month.gb) }} GB</span></div>
   <div class="stat"><small>Clientes</small><b>{{ summary.total }}</b>
     <span>{{ summary.online }} en línea ahora</span></div>
-  <div class="stat"><small>Tráfico consumido</small><b>{{ summary.used_bytes|bytes }}</b>
-    <span>total de todos los clientes</span></div>
+  <div class="stat"><small>Tráfico del mes</small><b>{{ month_traffic|bytes }}</b>
+    <div class="bar"><i style="width: {{ [100 * month_traffic / month_limit, 100]|min|round(1) }}%" class="{% if month_traffic >= 0.9 * month_limit %}hot{% endif %}"></i></div>
+    <span>de {{ month_limit|bytes }} incluidos en el VPS</span></div>
 </section>
 
 <section class="chips">
@@ -29,7 +39,7 @@
   {% for p in plans %}
   <a class="plan" href="/clients/new?plan={{ p.id }}">
     <b>{{ p.name }}</b>
-    <span class="price">{{ p.price_cup|cup }} CUP</span>
+    {% if p.price_cup %}<span class="price">{{ p.price_cup|cup }} CUP</span>{% else %}<span class="price free">GRATIS</span>{% endif %}
     <small>{{ "%g"|format(p.gb) }} GB{% if p.days %} · {{ p.days }} días{% endif %}</small>
   </a>
   {% else %}
@@ -37,6 +47,37 @@
   {% endfor %}
 </section>
 
+<section class="card" style="margin-top:1.6rem">
+  <h2>Consumo de todos los clientes (30 días)</h2>
+  <div class="legend"><span><i class="sw s1"></i>Bajada</span><span><i class="sw s2"></i>Subida</span></div>
+  <div class="viz" id="d-chart"></div>
+</section>
+
+<h2>Los que más consumen hoy</h2>
+<div class="table">
+<table>
+  <thead><tr><th>Cliente</th><th class="num">Bajada</th><th class="num">Subida</th><th class="num">Total hoy</th></tr></thead>
+  <tbody>
+  {% for t in top %}
+  <tr><td><a href="/clients/{{ t.id }}">{{ t.name }}</a></td><td class="num">{{ t.down_bytes|bytes }}</td>
+      <td class="num">{{ t.up_bytes|bytes }}</td><td class="num"><b>{{ t.total|bytes }}</b></td></tr>
+  {% else %}
+  <tr><td colspan="4" class="muted">Nadie ha consumido todavía hoy.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="small"><a href="/monitor">Ver todos en vivo →</a></p>
+
 <h2>Últimas ventas</h2>
 {% include "_sales_table.html" with context %}
+<script src="/static/charts.js"></script>
+<script>
+(function () {
+  const days = {{ history|tojson }};
+  const host = document.getElementById("d-chart");
+  window.VizCharts.dailyChart(host, days);
+  window.addEventListener("resize", () => window.VizCharts.dailyChart(host, days));
+})();
+</script>
 {% endblock %}

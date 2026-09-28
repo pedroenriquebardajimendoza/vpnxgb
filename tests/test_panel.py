@@ -43,7 +43,9 @@ def use(panel, client_id, rx, tx):
 
 def test_default_plans(panel):
     plans = {p["name"]: (p["gb"], p["price_cup"]) for p in panel.list_plans()}
-    assert plans == {"3 GB": (3, 1000), "6 GB": (6, 1500), "10 GB": (10, 3000)}
+    assert plans == {
+        "Prueba gratis": (1, 0), "3 GB": (3, 1000), "6 GB": (6, 1500), "10 GB": (10, 3000)
+    }
 
 
 def test_create_client_and_sale(panel):
@@ -189,3 +191,85 @@ def test_x25519_rfc7748_vector():
     assert base64.b64decode(pub).hex() == (
         "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a"
     )
+
+
+def test_down_up_split_and_daily_history(panel):
+    cid = panel.create_client("Hist", plan_id(panel, "10 GB"))
+    use(panel, cid, 100, 300)  # rx = subida 100, tx = bajada 300
+    panel.collect_usage()
+    c = panel.get_client(cid)
+    assert (c["down_bytes"], c["up_bytes"], c["used_bytes"]) == (300, 100, 400)
+    days = panel.history(cid, days=30)
+    assert len(days) == 30 and days[-1]["down"] == 300 and days[-1]["up"] == 100
+    assert panel.history(days=7)[-1]["down"] == 300
+    top = panel.top_consumers()
+    assert top[0]["name"] == "Hist" and top[0]["total"] == 400
+    assert panel.month_traffic() == 400
+
+
+def test_live_rates_and_pending_counters(panel, monkeypatch):
+    cid = panel.create_client("Live", plan_id(panel, "3 GB"))
+    pk = panel.get_client(cid)["public_key"]
+    clock = [1000.0]
+    monkeypatch.setattr(service.time, "monotonic", lambda: clock[0])
+    panel.wg.fake_peers[pk] = PeerStats(pk, 0, 0, int(service.now().timestamp()), "5.6.7.8:1234")
+    panel.live()
+    clock[0] += 2
+    panel.wg.fake_peers[pk] = PeerStats(pk, 2000, 10000, int(service.now().timestamp()), "5.6.7.8:1234")
+    row = panel.live(cid)[0]
+    assert row["down_rate"] == 5000 and row["up_rate"] == 1000
+    assert row["down_bytes"] == 10000 and row["up_bytes"] == 2000  # aún sin collect_usage
+    assert row["online"] and row["endpoint"] == "5.6.7.8:1234"
+
+
+def test_migration_adds_trial_plan_once(tmp_path):
+    import sqlite3
+
+    from vpnxgb.db import Database
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        "CREATE TABLE plans (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, gb REAL, "
+        "price_cup INTEGER, days INTEGER DEFAULT 0, down_mbps REAL DEFAULT 0, "
+        "up_mbps REAL DEFAULT 0, active INTEGER DEFAULT 1);"
+        "INSERT INTO plans (name, gb, price_cup) VALUES ('3 GB', 3, 1000);"
+        "CREATE TABLE clients (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, note TEXT, "
+        "private_key TEXT, public_key TEXT, preshared_key TEXT, address TEXT, "
+        "quota_bytes INTEGER, used_bytes INTEGER, down_mbps REAL, up_mbps REAL, status TEXT, "
+        "expires_at TEXT, created_at TEXT, last_rx INTEGER, last_tx INTEGER, "
+        "last_handshake INTEGER);"
+    )
+    conn.close()
+    db = Database(str(path))
+    db.init()
+    db.init()
+    with db.connect() as c:
+        names = [r["name"] for r in c.execute("SELECT name FROM plans")]
+        cols = {r["name"] for r in c.execute("PRAGMA table_info(clients)")}
+    assert names.count("Prueba gratis") == 1
+    assert {"down_bytes", "up_bytes", "endpoint"} <= cols
+
+
+def test_monitor_pages(app, panel):
+    panel.create_client("Mon", plan_id(panel, "Prueba gratis"))
+    with TestClient(app) as web:
+        assert web.get("/api/live").status_code == 401
+        web.post("/login", data={"username": "admin", "password": "secreto"})
+        data = web.get("/api/live").json()
+        assert data["clients"][0]["name"] == "Mon" and "server" in data
+        assert "Monitor" in web.get("/monitor").text
+        assert "GRATIS" in web.get("/").text
+        assert "Gratis" in web.get("/sales").text
+
+
+def test_live_rates_when_counters_mutate_in_place(panel, monkeypatch):
+    cid = panel.create_client("Mut", plan_id(panel, "3 GB"))
+    pk = panel.get_client(cid)["public_key"]
+    clock = [50.0]
+    monkeypatch.setattr(service.time, "monotonic", lambda: clock[0])
+    peer = panel.wg.fake_peers[pk]
+    panel.live()
+    clock[0] += 1
+    peer.tx += 4000
+    assert panel.live(cid)[0]["down_rate"] == 4000

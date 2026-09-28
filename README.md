@@ -5,9 +5,10 @@ Panel web para vender configuraciones de **WireGuard por paquetes de datos**
 
 ## Qué hace
 
-- **Planes**: vienen tres por defecto, que puedes cambiar o ampliar desde el panel:
+- **Planes**: vienen cuatro por defecto, que puedes cambiar o ampliar desde el panel:
   | Plan  | Precio   |
   |-------|----------|
+  | Prueba gratis (1 GB) | 0 CUP |
   | 3 GB  | 1000 CUP |
   | 6 GB  | 1500 CUP |
   | 10 GB | 3000 CUP |
@@ -25,6 +26,11 @@ Panel web para vender configuraciones de **WireGuard por paquetes de datos**
 - **Ajustes manuales**: regalar o quitar GB, cambiar la fecha de vencimiento,
   poner el consumo a cero.
 - **Ventas**: lo vendido hoy y en el mes (en CUP) y el historial de cada cliente.
+- **Monitor en vivo (estilo MikroTik)**: velocidad actual de bajada y subida de
+  cada cliente (se actualiza cada 2 s), totales de bajada y subida, IP real desde
+  donde se conecta, última conexión, CPU, RAM, disco y tráfico del mes del VPS.
+- **Historial**: gráfica de consumo por día (30 días) de cada cliente y del
+  servidor completo, y la lista de los que más consumen hoy.
 - Diseño pensado para usarlo **desde el móvil**.
 
 ## Instalación en el VPS
@@ -49,6 +55,10 @@ Recomendado: pon el reloj del servidor en hora de Cuba para que las ventas
 ```bash
 timedatectl set-timezone America/Havana && systemctl restart vpnxgb
 ```
+
+Si tu VPS incluye otro tráfico mensual (1000 GB en el Droplet de 6 $ de
+DigitalOcean), cámbialo en `/etc/vpnxgb/vpnxgb.env` con
+`VPNXGB_MONTHLY_TRAFFIC_GB=1000` y reinicia: `systemctl restart vpnxgb`.
 
 ### Actualizar
 

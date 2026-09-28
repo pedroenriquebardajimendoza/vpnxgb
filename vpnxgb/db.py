@@ -36,6 +36,19 @@ CREATE TABLE IF NOT EXISTS clients (
     last_handshake INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS usage_daily (
+    client_id   INTEGER NOT NULL,
+    day         TEXT    NOT NULL,             -- YYYY-MM-DD
+    down_bytes  INTEGER NOT NULL DEFAULT 0,
+    up_bytes    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (client_id, day)
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS sales (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     client_id   INTEGER,
@@ -48,7 +61,10 @@ CREATE TABLE IF NOT EXISTS sales (
 );
 """
 
+TRIAL_PLAN = ("Prueba gratis", 1, 0)
+
 DEFAULT_PLANS = [
+    TRIAL_PLAN,
     ("3 GB", 3, 1000),
     ("6 GB", 6, 1500),
     ("10 GB", 10, 3000),
@@ -79,8 +95,36 @@ class Database:
         with self.connect() as conn:
             conn.execute("PRAGMA journal_mode = WAL")
             conn.executescript(SCHEMA)
+            self._migrate(conn)
             if conn.execute("SELECT COUNT(*) FROM plans").fetchone()[0] == 0:
                 conn.executemany(
                     "INSERT INTO plans (name, gb, price_cup) VALUES (?, ?, ?)",
                     DEFAULT_PLANS,
                 )
+                self._mark(conn, "seed_trial_plan")
+            if not self._done(conn, "seed_trial_plan"):
+                # Instalaciones anteriores: se añade una sola vez el plan gratis.
+                conn.execute(
+                    "INSERT INTO plans (name, gb, price_cup) VALUES (?, ?, ?)", TRIAL_PLAN
+                )
+                self._mark(conn, "seed_trial_plan")
+
+    @staticmethod
+    def _migrate(conn) -> None:
+        """Añade columnas nuevas a bases de datos creadas por versiones anteriores."""
+        columns = {r["name"] for r in conn.execute("PRAGMA table_info(clients)")}
+        for name, ddl in (
+            ("down_bytes", "INTEGER NOT NULL DEFAULT 0"),
+            ("up_bytes", "INTEGER NOT NULL DEFAULT 0"),
+            ("endpoint", "TEXT NOT NULL DEFAULT ''"),
+        ):
+            if name not in columns:
+                conn.execute(f"ALTER TABLE clients ADD COLUMN {name} {ddl}")
+
+    @staticmethod
+    def _done(conn, key: str) -> bool:
+        return conn.execute("SELECT 1 FROM settings WHERE key = ?", (key,)).fetchone() is not None
+
+    @staticmethod
+    def _mark(conn, key: str) -> None:
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, '1')", (key,))

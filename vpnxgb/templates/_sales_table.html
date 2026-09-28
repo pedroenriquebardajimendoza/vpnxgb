@@ -8,8 +8,8 @@
     <td>{{ s.created_at[:16] }}</td>
     <td>{% if s.client_id %}<a href="/clients/{{ s.client_id }}">{{ s.client_name }}</a>{% else %}{{ s.client_name }}{% endif %}</td>
     <td>{{ s.plan_name }}</td>
-    <td>{{ "Nuevo" if s.kind == "nuevo" else "Recarga" }}</td>
-    <td class="num">{{ s.price_cup|cup }}</td>
+    <td>{% if not s.price_cup %}Gratis{% elif s.kind == "nuevo" %}Nuevo{% else %}Recarga{% endif %}</td>
+    <td class="num">{% if s.price_cup %}{{ s.price_cup|cup }}{% else %}<span class="free">0</span>{% endif %}</td>
   </tr>
   {% else %}
   <tr><td colspan="5" class="muted">Todavía no hay ventas.</td></tr>

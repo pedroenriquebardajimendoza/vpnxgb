@@ -11,7 +11,7 @@ from datetime import datetime
 import qrcode
 import qrcode.image.svg
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -20,6 +20,7 @@ from .auth import verify_password
 from .config import Settings, load_settings
 from .db import Database
 from .service import GB, Panel, PanelError, now, parse_time
+from .sysinfo import server_info
 from .wg import WireGuard
 
 log = logging.getLogger("vpnxgb")
@@ -106,6 +107,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if path.startswith("/static") or path == "/login":
             return await call_next(request)
         if not request.session.get("user"):
+            if path.startswith("/api/"):
+                return JSONResponse({"error": "login"}, status_code=401)
             return RedirectResponse("/login", status_code=303)
         return await call_next(request)
 
@@ -190,7 +193,36 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             summary=panel.summary(),
             recent=panel.list_sales(limit=8),
             plans=panel.list_plans(only_active=True),
+            top=panel.top_consumers(),
+            month_traffic=panel.month_traffic(),
+            month_limit=settings.monthly_traffic_gb * GB,
+            history=panel.history(days=30),
         )
+
+    # ------------------------------------------------------------ monitor
+
+    @app.get("/monitor", response_class=HTMLResponse)
+    def monitor(request: Request):
+        return render(request, "monitor.html")
+
+    @app.get("/api/live")
+    def api_live(client: int | None = None):
+        clients = panel.live(client)
+        data = {
+            "time": now().strftime("%H:%M:%S"),
+            "clients": clients,
+            "totals": {
+                "down_rate": sum(c["down_rate"] for c in clients),
+                "up_rate": sum(c["up_rate"] for c in clients),
+                "online": sum(1 for c in clients if c["online"]),
+                "total": len(clients),
+            },
+        }
+        if client is None:
+            data["server"] = server_info()
+            data["month_traffic"] = panel.month_traffic()
+            data["month_limit"] = settings.monthly_traffic_gb * GB
+        return data
 
     @app.post("/refresh")
     def refresh(request: Request, next: str = Form("/")):
@@ -241,6 +273,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             plans=panel.list_plans(only_active=True),
             sales=sales,
             expires=parse_time(client["expires_at"]),
+            history=panel.history(client_id, days=30),
         )
 
     def _filename(client) -> str:

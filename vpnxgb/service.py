@@ -2,7 +2,8 @@
 
 import logging
 import threading
-from datetime import datetime, timedelta
+import time
+from datetime import date, datetime, timedelta
 
 from .config import Settings
 from .db import Database
@@ -44,6 +45,7 @@ class Panel:
         self.wg = wg
         self.lock = threading.RLock()
         self._server_public_key = settings.server_public_key
+        self._live_cache: tuple | None = None
 
     # ------------------------------------------------------------ utilidades
 
@@ -143,11 +145,22 @@ class Panel:
                 # Si el contador bajó, la interfaz se reinició: todo lo actual es nuevo.
                 d_rx = peer.rx - client["last_rx"] if peer.rx >= client["last_rx"] else peer.rx
                 d_tx = peer.tx - client["last_tx"] if peer.tx >= client["last_tx"] else peer.tx
+                # rx = lo que recibe el servidor = SUBIDA del cliente; tx = BAJADA.
                 conn.execute(
-                    "UPDATE clients SET used_bytes = used_bytes + ?, last_rx = ?, last_tx = ?, "
-                    "last_handshake = ? WHERE id = ?",
-                    (d_rx + d_tx, peer.rx, peer.tx, peer.latest_handshake, client["id"]),
+                    "UPDATE clients SET used_bytes = used_bytes + ?, down_bytes = down_bytes + ?, "
+                    "up_bytes = up_bytes + ?, last_rx = ?, last_tx = ?, last_handshake = ?, "
+                    "endpoint = CASE WHEN ? != '' THEN ? ELSE endpoint END WHERE id = ?",
+                    (d_rx + d_tx, d_tx, d_rx, peer.rx, peer.tx, peer.latest_handshake,
+                     peer.endpoint, peer.endpoint, client["id"]),
                 )
+                if d_rx or d_tx:
+                    conn.execute(
+                        "INSERT INTO usage_daily (client_id, day, down_bytes, up_bytes) "
+                        "VALUES (?, ?, ?, ?) ON CONFLICT(client_id, day) DO UPDATE SET "
+                        "down_bytes = down_bytes + excluded.down_bytes, "
+                        "up_bytes = up_bytes + excluded.up_bytes",
+                        (client["id"], now().strftime("%Y-%m-%d"), d_tx, d_rx),
+                    )
                 client = self._client(conn, client["id"])
                 status = self._natural_status(client)
                 if status != ACTIVE:
@@ -356,6 +369,108 @@ class Panel:
         if s.persistent_keepalive:
             lines.append(f"PersistentKeepalive = {s.persistent_keepalive}")
         return "\n".join(lines) + "\n"
+
+    # ------------------------------------------------------------ monitor en vivo
+
+    def live(self, client_id: int | None = None) -> list[dict]:
+        """Velocidad actual y contadores al segundo de cada cliente (como un MikroTik).
+
+        La velocidad se calcula comparando con la lectura anterior de `wg`. Si se
+        pide otra vez en menos de 1 s se devuelve la misma lectura, para que varias
+        pestañas abiertas no den medidas raras."""
+        with self.lock:
+            t = time.monotonic()
+            if self._live_cache and t - self._live_cache[0] < 1.0:
+                _, rates, counters, stats = self._live_cache
+            else:
+                stats = self.wg.stats()
+                # Copia de los contadores: la siguiente lectura se compara con esta.
+                counters = {pk: (p.rx, p.tx) for pk, p in stats.items()}
+                rates = {}
+                prev = self._live_cache
+                if prev:
+                    dt = t - prev[0]
+                    for pk, (rx, tx) in counters.items():
+                        old = prev[2].get(pk)
+                        if old and rx >= old[0] and tx >= old[1]:
+                            rates[pk] = ((tx - old[1]) / dt, (rx - old[0]) / dt)
+                self._live_cache = (t, rates, counters, stats)
+
+        sql = "SELECT * FROM clients"
+        args: tuple = ()
+        if client_id is not None:
+            sql += " WHERE id = ?"
+            args = (client_id,)
+        with self.db.connect() as conn:
+            rows = conn.execute(sql, args).fetchall()
+
+        online_since = int(now().timestamp()) - 180
+        result = []
+        for c in rows:
+            peer = stats.get(c["public_key"]) if c["status"] == ACTIVE else None
+            down_rate, up_rate = rates.get(c["public_key"], (0.0, 0.0)) if peer else (0.0, 0.0)
+            # Lo que wg ya contó pero el panel aún no ha sumado (lectura cada minuto).
+            pend_up = pend_down = 0
+            if peer:
+                pend_up = peer.rx - c["last_rx"] if peer.rx >= c["last_rx"] else peer.rx
+                pend_down = peer.tx - c["last_tx"] if peer.tx >= c["last_tx"] else peer.tx
+            handshake = peer.latest_handshake if peer else c["last_handshake"]
+            result.append({
+                "id": c["id"],
+                "name": c["name"],
+                "status": c["status"],
+                "address": c["address"],
+                "endpoint": (peer.endpoint if peer and peer.endpoint else c["endpoint"]),
+                "online": bool(peer) and handshake > online_since,
+                "last_handshake": handshake,
+                "down_rate": down_rate,          # bytes/s
+                "up_rate": up_rate,
+                "down_bytes": c["down_bytes"] + pend_down,
+                "up_bytes": c["up_bytes"] + pend_up,
+                "used_bytes": c["used_bytes"] + pend_down + pend_up,
+                "quota_bytes": c["quota_bytes"],
+                "down_mbps": c["down_mbps"],
+                "up_mbps": c["up_mbps"],
+            })
+        return result
+
+    def history(self, client_id: int | None = None, days: int = 30) -> list[dict]:
+        """Consumo por día de los últimos `days` días (de un cliente o de todos)."""
+        today = now().date()
+        start = today - timedelta(days=days - 1)
+        sql = ("SELECT day, SUM(down_bytes) AS down, SUM(up_bytes) AS up FROM usage_daily "
+               "WHERE day >= ?")
+        args: list = [start.isoformat()]
+        if client_id is not None:
+            sql += " AND client_id = ?"
+            args.append(client_id)
+        with self.db.connect() as conn:
+            found = {r["day"]: (r["down"], r["up"])
+                     for r in conn.execute(sql + " GROUP BY day", args)}
+        out = []
+        for i in range(days):
+            d: date = start + timedelta(days=i)
+            down, up = found.get(d.isoformat(), (0, 0))
+            out.append({"day": d.isoformat(), "down": down, "up": up})
+        return out
+
+    def top_consumers(self, day: str | None = None, limit: int = 5):
+        day = day or now().strftime("%Y-%m-%d")
+        with self.db.connect() as conn:
+            return conn.execute(
+                "SELECT c.id, c.name, u.down_bytes, u.up_bytes, "
+                "u.down_bytes + u.up_bytes AS total FROM usage_daily u "
+                "JOIN clients c ON c.id = u.client_id WHERE u.day = ? "
+                "ORDER BY total DESC LIMIT ?",
+                (day, limit),
+            ).fetchall()
+
+    def month_traffic(self) -> int:
+        with self.db.connect() as conn:
+            return conn.execute(
+                "SELECT COALESCE(SUM(down_bytes + up_bytes), 0) FROM usage_daily WHERE day LIKE ?",
+                (now().strftime("%Y-%m") + "%",),
+            ).fetchone()[0]
 
     # ------------------------------------------------------------ ventas
 

@@ -76,6 +76,7 @@ class PeerStats:
     rx: int              # bytes recibidos por el servidor (subida del cliente)
     tx: int              # bytes enviados por el servidor (bajada del cliente)
     latest_handshake: int
+    endpoint: str = ""   # IP:puerto real desde donde se conecta el cliente
 
 
 def parse_dump(output: str) -> dict[str, PeerStats]:
@@ -96,6 +97,7 @@ def parse_dump(output: str) -> dict[str, PeerStats]:
             latest_handshake=int(cols[4]),
             rx=int(cols[5]),
             tx=int(cols[6]),
+            endpoint="" if cols[2] == "(none)" else cols[2],
         )
     return peers
 

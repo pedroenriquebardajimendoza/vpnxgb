@@ -15,7 +15,7 @@
         <input type="radio" name="plan_id" value="{{ p.id }}" required
                {% if selected == p.id or (not selected and loop.first) %}checked{% endif %}>
         <b>{{ p.name }}</b>
-        <span class="price">{{ p.price_cup|cup }} CUP</span>
+        {% if p.price_cup %}<span class="price">{{ p.price_cup|cup }} CUP</span>{% else %}<span class="price free">GRATIS</span>{% endif %}
         <small>{{ "%g"|format(p.gb) }} GB{% if p.days %} · {{ p.days }} días{% endif %}
           {% if p.down_mbps or p.up_mbps %}<br>↓ {{ p.down_mbps|speed }} · ↑ {{ p.up_mbps|speed }}{% endif %}</small>
       </label>
